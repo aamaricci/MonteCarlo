@@ -1,9 +1,7 @@
-HERE   = `pwd`
-EXE=testISING_2D
-DIREXE   = $(HERE)/test
+HERE= `pwd`
+EXE=mc_ising2d
 
-OBJS     = 
-OBJS_DEB =
+OBJS= 
 
 
 ##$ SET INCLUDE AND LINK OPTIONS USING pkg-config
@@ -24,7 +22,7 @@ debug: FFLAG=$(DFLAG)
 
 compile: $(OBJS)
 	@echo " ..................... compile ........................... "
-	$(FC) $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o test/$(EXE) $(LIBARGS)
+	$(FC) $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE) $(LIBARGS)
 	@echo " ...................... done .............................. "
 	@echo ""
 	@echo ""

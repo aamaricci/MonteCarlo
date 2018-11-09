@@ -25,6 +25,7 @@ program ising2d
   call Init_Ising(Ising,Probability)
   call MC_Ising(Ising,Probability)
 
+  
 contains
 
 
@@ -37,8 +38,8 @@ contains
     call assert_shape(Ising,[N,N])
     call mersenne_init(seed)
     !
-    do i=1,N
-       do j=1,N
+    do j=1,N
+       do i=1,N
           Ising(i,j) = sgn(2*mersenne()-1)
        enddo
     enddo
@@ -145,8 +146,7 @@ contains
     !
     do iter=1,Nsweep
        !
-       ! i = int_mersenne(1,10)
-       ! j = int_mersenne(1,10)
+       !Lattice Sweep
        do i=1,N
           do j=1,N
              !
@@ -185,7 +185,6 @@ contains
     Cv  = (Esq_mean - E_mean**2)/Temp**2/Nlat
     !
     open(unit=100,file="MC_ising.dat",access='append')
-    write(*,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
     write(100,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
     close(100)
   end subroutine MC_Ising
