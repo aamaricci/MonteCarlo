@@ -26,12 +26,11 @@ compile: $(OBJS)
 	@echo " ...................... done .............................. "
 	@echo ""
 	@echo ""
-	@echo "created" test/$(EXE)
+	@echo "created" ~/.bin/$(EXE)
 
 clean: 
 	@echo "Cleaning:"
 	@rm -f *.mod
 	@rm -f *.o
 	@rm -f *~
-	@rm -f ${DIREXE}/${EXE}
 	@echo ""

@@ -10,9 +10,6 @@ program ising2d
   integer :: seed
   real(8) :: Temp
   !
-  integer,dimension(:,:),allocatable :: Ising
-  real(8),dimension(0:8)             :: Probability
-  !
   call parse_input_variable(Nx,"Nx","inputISING2d.conf",default=10)
   call parse_input_variable(Nsweep,"Nsweep","inputISING2d.conf",default=100000)
   call parse_input_variable(Nwarm,"Nwarm","inputISING2d.conf",default=1000)
@@ -21,39 +18,110 @@ program ising2d
   call parse_input_variable(seed,"SEED","inputISING2d.conf",default=2342161)
   call save_input("inputISING2d.conf")
 
-  allocate(Ising(Nx,Nx))
-  call Init_Ising(Ising,Probability)
-  call MC_Ising(Ising,Probability)
 
-  
+  open(unit=100,file="ising_2d.dat",position='append')
+  call mersenne_init(seed)
+  call MC_Ising(Nx,Nsweep,Nwarm,Nmeas,100)
+  close(100)
+
 contains
 
 
-  subroutine Init_Ising(Ising,Probability)
-    integer,dimension(:,:)             :: Ising
-    real(8),dimension(0:)              :: Probability
-    integer                            :: N,i,j,k
+  subroutine MC_Ising(Nx,Nsweep,Nwarm,Nmeas,unit)
+    integer                  :: Nx
+    integer                  :: Nsweep
+    integer                  :: Nwarm
+    integer                  :: Nmeas
+    integer                  :: unit
+    integer,dimension(Nx,Nx) :: Ising
+    !
+    real(8)                  :: Ene,Mag,CV,Chi
+    real(8)                  :: P,Ediff
+    integer                  :: Spin,WeissField
+    integer                  :: iter
+    integer                  :: i,j,k,N,Nlat
+    integer                  :: Nacc,Nave
+    !
+    real(8)                  :: M_sum,Msq_sum
+    real(8)                  :: E_sum,Esq_sum
+    real(8)                  :: M_mean,Msq_mean
+    real(8)                  :: E_mean,Esq_mean
+    !
+    !
+    Nlat=Nx*Nx
+    !
+    call Init_Ising(Ising)
+    !
+    Ene = Ising_Energy(Ising)
+    Mag = sum(Ising)
+    !
+    Nacc = 0
+    Nave = 0
+    E_sum   = 0d0
+    M_sum   = 0d0
+    Esq_sum = 0d0
+    Msq_sum = 0d0    
+    !
+    do iter=1,Nsweep
+       !
+       !Lattice Sweep
+       do i=1,Nx
+          do j=1,Nx
+             !
+             Spin       = Ising(i,j)
+             WeissField = Ising_WF(Ising,i,j)
+             Ediff      = 2d0*Spin*WeissField
+             P          = exp(-Ediff/Temp)
+             !      
+             if( min(1d0,P) > mersenne()) then  !flip-spin: ACCEPT
+                Ising(i,j) = -Spin
+                Ene  = Ene + 2d0*Spin*WeissField
+                Mag  = Mag - 2d0*Spin
+                Nacc = Nacc + 1
+             end if
+             !
+             if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
+                Nave    = Nave + 1
+                E_sum   = E_sum + Ene
+                M_sum   = M_sum + Mag
+                Esq_sum = Esq_sum + Ene*Ene
+                Msq_Sum = Msq_Sum + Mag*Mag
+             endif
+             !
+          enddo
+       enddo
+       !
+    enddo
+    !
+    E_mean = E_sum/Nave
+    M_mean = M_sum/Nave
+    Esq_mean = Esq_sum/Nave
+    Msq_mean = Msq_sum/Nave
+    !
+    Mag = abs(M_mean)/Nlat
+    Ene = E_mean/Nlat
+    Chi = (Msq_Mean - M_mean**2)/Temp/Nlat
+    Cv  = (Esq_mean - E_mean**2)/Temp**2/Nlat
+    !
+    write(unit,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
+    !
+  end subroutine MC_Ising
+
+
+
+  subroutine Init_Ising(Ising)
+    integer,dimension(:,:) :: Ising
+    integer                :: N,i,j
     !
     N=size(Ising,1)
     call assert_shape(Ising,[N,N])
-    call mersenne_init(seed)
     !
     do j=1,N
        do i=1,N
           Ising(i,j) = sgn(2*mersenne()-1)
        enddo
     enddo
-    Probability=0d0
-    Probability(4+4) = exp(-2*4/Temp)
-    Probability(4+2) = exp(-2*2/Temp)
-    Probability(4+0) = exp(-2*0/Temp)
-    Probability(4-2) = exp( 2*2/Temp)
-    Probability(4-4) = exp( 2*4/Temp)
-    do i=1,size(Probability)
-       if(isnan(Probability(i)).OR.isinfty(Probability(i)))stop "P undefined: overflow in Exp(-DeltaE/Temp)"
-    enddo
   end subroutine Init_Ising
-
 
 
   function Ising_Neighbors(Ising,i,j) result(neigh)
@@ -113,80 +181,23 @@ contains
   end function Ising_Energy
 
 
-  subroutine MC_Ising(Ising,Probability)
-    integer,dimension(:,:) :: Ising
-    real(8),dimension(0:)  :: Probability
-    !
-    real(8)                :: Ene,Mag,CV,Chi
-    real(8)                :: P
-    integer                :: Spin,WeissField
-    integer                :: iter
-    integer                :: i,j,k,N,Nlat
-    integer                :: Nacc,Nave
-    !
-    real(8)                :: M_sum,Msq_sum
-    real(8)                :: E_sum,Esq_sum
-    real(8)                :: M_mean,Msq_mean
-    real(8)                :: E_mean,Esq_mean
-    !
-    !
-    N   =size(Ising,1)
-    Nlat=N*N
-    call assert_shape(Ising,[N,N])
-    !
-    Ene = Ising_Energy(Ising)
-    Mag = sum(Ising)
-    !
-    Nacc = 0
-    Nave = 0
-    E_sum   = 0d0
-    M_sum   = 0d0
-    Esq_sum = 0d0
-    Msq_sum = 0d0    
-    !
-    do iter=1,Nsweep
-       !
-       !Lattice Sweep
-       do i=1,N
-          do j=1,N
-             !
-             Spin       = Ising(i,j)
-             WeissField = Ising_WF(Ising,i,j)
-             !      
-             !Get probability of spin-flip Ising(i,j)
-             if( Probability(4+Spin*WeissField) > mersenne()) then  !flip-spin: ACCEPT
-                Ising(i,j) = -Spin
-                Ene  = Ene + 2d0*Spin*WeissField
-                Mag  = Mag - 2d0*Spin
-                Nacc = Nacc + 1
-             end if
-             !
-             if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
-                Nave    = Nave + 1
-                E_sum   = E_sum + Ene
-                M_sum   = M_sum + Mag
-                Esq_sum = Esq_sum + Ene*Ene
-                Msq_Sum = Msq_Sum + Mag*Mag
-             endif
-             !
-          enddo
-       enddo
-       !
-    enddo
-    !
-    E_mean = E_sum/Nave
-    M_mean = M_sum/Nave
-    Esq_mean = Esq_sum/Nave
-    Msq_mean = Msq_sum/Nave
-    !
-    Mag = abs(M_mean)/Nlat
-    Ene = E_mean/Nlat
-    Chi = (Msq_Mean - M_mean**2)/Temp/Nlat
-    Cv  = (Esq_mean - E_mean**2)/Temp**2/Nlat
-    !
-    open(unit=100,file="MC_ising.dat",access='append')
-    write(100,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
-    close(100)
-  end subroutine MC_Ising
+
 
 end program ising2d
+
+
+
+
+
+
+
+! subroutine Init_Probability(Probability)
+!   real(8),dimension(5) :: Probability
+!   integer               :: N,i,j,k
+!   Probability(5) = exp(-2*4/Temp)
+!   Probability(4) = exp(-2*2/Temp)
+!   Probability(3) = exp(-2*0/Temp)
+!   Probability(2) = exp( 2*2/Temp)
+!   Probability(1) = exp( 2*4/Temp)
+!   if( any(isnan(Probability)) ) stop "P undefined: overflow in Exp(-DeltaE/Temp)"
+! end subroutine Init_Probability
