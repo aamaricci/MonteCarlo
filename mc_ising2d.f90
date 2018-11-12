@@ -21,13 +21,13 @@ program ising2d
 
   open(unit=100,file="ising_2d.dat",position='append')
   call mersenne_init(seed)
-  call MC_Ising(Nx,Nsweep,Nwarm,Nmeas,100)
+  call MC_Ising2D(Nx,Nsweep,Nwarm,Nmeas,100)
   close(100)
 
 contains
 
 
-  subroutine MC_Ising(Nx,Nsweep,Nwarm,Nmeas,unit)
+  subroutine MC_Ising2D(Nx,Nsweep,Nwarm,Nmeas,unit)
     integer                  :: Nx
     integer                  :: Nsweep
     integer                  :: Nwarm
@@ -105,7 +105,7 @@ contains
     !
     write(unit,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
     !
-  end subroutine MC_Ising
+  end subroutine MC_Ising2D
 
 
 
@@ -183,7 +183,7 @@ contains
 
 
 
-end program ising2d
+end program
 
 
 
