@@ -1,5 +1,6 @@
 program xy2d
   USE SCIFOR
+  ! USE MPI
   implicit none
 
   integer :: Nx
@@ -8,16 +9,26 @@ program xy2d
   integer :: Nmeas
   integer :: Ntemp
   integer :: seed
-  real(8) :: DTheta
+  real(8) :: Dtheta
   real(8) :: Temp
   !
+  integer :: comm
+  integer :: rank
+  integer :: master
+
+  
+  ! call Init_MPI(comm,.true.)
+  ! rank   = get_rank_MPI(comm)
+  ! master = get_master_MPI(comm)
+  
   call parse_input_variable(Nx,"Nx","inputXY2d.conf",default=10)
   call parse_input_variable(Nsweep,"Nsweep","inputXY2d.conf",default=100000)
   call parse_input_variable(Nwarm,"Nwarm","inputXY2d.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputXY2d.conf",default=100)
   call parse_input_variable(Temp,"Temp","inputXY2d.conf",default=1d0)
-  call parse_input_variable(dtheta,"dtheta","inputXY2d.conf",default=0.1d0,comment="Range of variation for theta in unit of 2pi")
+  call parse_input_variable(Dtheta,"Dtheta","inputXY2d.conf",default=0.1d0)
   call parse_input_variable(seed,"SEED","inputXY2d.conf",default=2342161)
+
   call save_input("inputXY2d.conf")
 
 
@@ -26,6 +37,8 @@ program xy2d
   call MC_xy2D(Nx,Nsweep,Nwarm,Nmeas,100)
   close(100)
 
+  ! call Finalize_MPI()
+  
 contains
 
 
@@ -37,7 +50,7 @@ contains
     integer                  :: unit
     real(8),dimension(Nx,Nx) :: Lattice
     !
-    real(8)                  :: theta
+    real(8)                  :: theta,rnd_theta
     real(8)                  :: theta_flip
     real(8)                  :: E0
     real(8)                  :: Eflip
@@ -53,13 +66,13 @@ contains
     real(8)                  :: E_mean
     real(8)                  :: Esq_mean
     !
-    real(8)                  :: Mag(2)
-    real(8)                  :: M_sum(2)
-    real(8)                  :: Msq_sum(2)
-    real(8)                  :: M_mean(2)
-    real(8)                  :: Msq_mean(2)
+    real(8)                  :: Mag(2),aMag
+    real(8)                  :: M_sum
+    real(8)                  :: Msq_sum
+    real(8)                  :: M_mean
+    real(8)                  :: Msq_mean
     !
-    real(8)                  :: CV,Chi(2)
+    real(8)                  :: CV,Chi
     integer                  :: iter
     integer                  :: i,j,k,N,Nlat
 
@@ -87,7 +100,8 @@ contains
           do j=1,Nx
              !
              theta      = Lattice(i,j)
-             theta_flip = theta + pi2*dtheta*(2d0*mersenne()-1d0)                          
+             rnd_theta  = Dtheta*pi*(2d0*mersenne()-1d0)
+             theta_flip = theta + rnd_theta !mod(theta + rnd_theta,pi2)
              E0         = Lattice_Eloc(Lattice,i,j)
              Eflip      = Lattice_Eloc(Lattice,i,j,theta_flip)
              Ediff      = Eflip - E0
@@ -106,9 +120,9 @@ contains
              if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
                 Nave    = Nave + 1
                 E_sum   = E_sum + Ene
-                M_sum   = M_sum + Mag
+                M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
                 Esq_sum = Esq_sum + Ene*Ene
-                Msq_Sum = Msq_Sum + Mag*Mag
+                Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
              endif
              !
           enddo
@@ -123,17 +137,18 @@ contains
     Esq_mean = Esq_sum/Nave
     Msq_mean = Msq_sum/Nave
     !
-    Mag = abs(M_mean)/Nlat
+    aMag = abs(M_mean)/Nlat
     Ene = E_mean/Nlat
     Chi = (Msq_Mean - M_mean**2)/Temp/Nlat
     Cv  = (Esq_mean - E_mean**2)/Temp**2/Nlat
     !
-    write(*,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
-    write(unit,*)temp,Mag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
+    write(*,*)temp,aMag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
+    write(unit,*)temp,aMag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave
     do i=1,Nx
        do j=1,Nx
           write(200,*)i,j,Lattice(i,j)
        enddo
+       write(200,*)""
     enddo
     !
   end subroutine MC_Xy2D
