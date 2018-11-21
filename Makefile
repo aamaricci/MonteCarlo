@@ -1,5 +1,5 @@
 HERE= `pwd`
-EXE=mc_xy2d
+EXE=mc_VO2_2d
 
 OBJS= 
 
