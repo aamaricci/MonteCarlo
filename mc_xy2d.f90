@@ -363,18 +363,3 @@ contains
 end program xy2d
 
 
-
-
-
-
-
-! subroutine Init_Probability(Probability)
-!   real(8),dimension(5) :: Probability
-!   integer               :: N,i,j,k
-!   Probability(5) = exp(-2*4/Temp)
-!   Probability(4) = exp(-2*2/Temp)
-!   Probability(3) = exp(-2*0/Temp)
-!   Probability(2) = exp( 2*2/Temp)
-!   Probability(1) = exp( 2*4/Temp)
-!   if( any(isnan(Probability)) ) stop "P undefined: overflow in Exp(-DeltaE/Temp)"
-! end subroutine Init_Probability

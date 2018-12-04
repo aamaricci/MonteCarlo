@@ -8,7 +8,7 @@ OBJS=
 INCARGS=$(shell pkg-config --cflags dmft_tools scifor)
 LIBARGS=$(shell pkg-config --libs   dmft_tools scifor)
 
-FFLAG = -O2 -ffree-line-length-none
+FFLAG = -O3 -faggressive-loop-optimizations -ffree-line-length-none
 DFLAG = -O0 -p -g -fimplicit-none -Wsurprising  -Waliasing -fwhole-file -fcheck=all -pedantic -fbacktrace -ffree-line-length-none
 
 
