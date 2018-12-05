@@ -29,6 +29,7 @@ program vo2_2d
   integer                          :: MpiRank
   integer                          :: MpiSize
   logical                          :: MpiMaster
+  real(8),allocatable,dimension(:) :: MpiSeed
   !
   call Init_MPI(MpiComm,.true.)
   MpiSize   = get_size_MPI(MpiComm)
@@ -47,16 +48,20 @@ program vo2_2d
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   if(MpiMaster)call save_input("inputVO2.conf")
   !
-  do irank=0,MpiSize-1
+  allocate(MpiSeed(MpiSize))
+  call random_number(MpiSeed)
+  do irank=1,MpiSize
      call Barrier_MPI(MpiComm)
-     if(irank==MpiRank)then
-        call random_number(rnd)
-        seed = int(1000000d0*rnd)
-        open(100,file="Seed_Rank"//str(MpiRank,4)//".dat")
+     if(irank==MpiRank+1)then
+        ! call random_number(rnd)
+        seed = int(Seed*MpiSeed(irank))
+        open(100,file="Seed_Rank"//str(irank,4)//".dat")
         write(100,*)seed
+        write(*,*)"Irank",irank," seed=",seed
         close(100)
      endif
   end do
+  !
   !
   x1=0d0
   x2=0d0
