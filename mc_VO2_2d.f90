@@ -13,13 +13,18 @@ program vo2_2d
   integer                          :: seed
   real(8)                          :: Drho
   real(8)                          :: Dtheta
-  real(8)                          :: Temp,rnd
+  real(8)                          :: Temp
   !
-  integer                          :: i,j,unit
+  integer                          :: i,j,unit,min_pos(2)
   real(8),dimension(-22:22)        :: X1
   real(8),dimension(-30:29)        :: X2
   real(8),dimension(-22:22,-30:29) :: EnergyLocal
-  real(8)                          :: Emax,y1,y2
+  real(8)                          :: Emin,Emax
+  ! real(8)                          :: Emin_x1,Emin_x2
+  ! real(8)                          :: Diag_x1,Diag_x2
+  ! real(8)                          :: Rho_min,Theta_min
+  ! real(8)                          :: Rho_diag,Theta_diag
+  ! real(8)                          :: Kmin,Kdiag,Vmin,Vdiag
   real(8)                          :: X1_min,X1_max
   real(8)                          :: X2_min,X2_max
   type(finter2d_type)              :: vo2_ElocInter
@@ -30,6 +35,7 @@ program vo2_2d
   integer                          :: MpiSize
   logical                          :: MpiMaster
   real(8),allocatable,dimension(:) :: MpiSeed
+
   !
   call Init_MPI(MpiComm,.true.)
   MpiSize   = get_size_MPI(MpiComm)
@@ -37,14 +43,14 @@ program vo2_2d
   MpiMaster = get_master_MPI(MpiComm)
   !
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
-  call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
-  call parse_input_variable(Nx,"Nx","inputVO2.conf",default=10)
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=100000)
+  call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0,comment="6.368 = 1/(Vmax-Vmin)")
+  call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=10000)
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
-  call parse_input_variable(Temp,"Temp","inputVO2.conf",default=1d0)
-  call parse_input_variable(Drho,"Drho","inputVO2.conf",default=0.1d0)
-  call parse_input_variable(Dtheta,"Dtheta","inputVO2.conf",default=0.1d0)
+  call parse_input_variable(Temp,"Temp","inputVO2.conf",default=4d0)
+  call parse_input_variable(Drho,"Drho","inputVO2.conf",default=0.05d0)
+  call parse_input_variable(Dtheta,"Dtheta","inputVO2.conf",default=0.05d0)
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   if(MpiMaster)call save_input("inputVO2.conf")
   !
@@ -53,7 +59,6 @@ program vo2_2d
   do irank=1,MpiSize
      call Barrier_MPI(MpiComm)
      if(irank==MpiRank+1)then
-        ! call random_number(rnd)
         seed = int(Seed*MpiSeed(irank))
         open(100,file="Seed_Rank"//str(irank,4)//".dat")
         write(100,*)seed
@@ -81,14 +86,13 @@ program vo2_2d
   !mirror w/ to Origin==(0,0) axis: x1-->-X1 && x2-->-X2
   forall(i=1:22,j=1:30)EnergyLocal(-i,-j) = EnergyLocal(i,j-1)
   !
+  Emin = minval(EnergyLocal)
   Emax = maxval(EnergyLocal)
   EnergyLocal = EnergyLocal - Emax
+  EnergyLocal = EnergyLocal/(Emax-Emin)
   !
   call splot3d("VO2_x1x2_data.dat",X1,X2,EnergyLocal,nosurface=.true.)
-
-
-
-  call init_finter2d(vo2_ElocInter,X1,X2,EnergyLocal,2)
+  !
   !
   X1_min = minval(x1)
   X1_max = maxval(x1)
@@ -96,8 +100,28 @@ program vo2_2d
   X2_min = minval(x2)
   X2_max = maxval(x2)
   !
+  ! min_pos = minloc(EnergyLocal(0:,0:))
+  ! Emin_x1 = x1(min_pos(1))
+  ! Emin_x2 = x2(min_pos(2))
+  ! rho_min  = sqrt(Emin_x1**2 + Emin_x2**2)
+  ! theta_min=atan(Emin_x2/Emin_x1)
 
-
+  ! Diag_x1 = maxval(x1)
+  ! Diag_x2 = maxval(x2)
+  ! rho_diag= sqrt(Diag_x1**2 + Diag_x2**2)
+  ! theta_diag= atan(Diag_x2/Diag_x1)
+  !
+  !
+  call init_finter2d(vo2_ElocInter,X1,X2,EnergyLocal,1)
+  ! !
+  ! Kmin = -Jh*rho_min**2
+  ! Kdiag= -Jh*rho_diag**2
+  ! Vmin = vo2_elocal(Emin_x1,Emin_x2)
+  ! Vdiag= vo2_elocal(Diag_x1,Diag_x2)
+  ! print*,rho_min,rho_min*rho_min
+  ! print*,"K=",Kmin,Kdiag
+  ! print*,"V=",lambda*Vmin,lambda*Vdiag
+  ! print*,"E_min VS. E_diag=",Kmin+lambda*Vmin,Kdiag+lambda*Vdiag
 
 
 
@@ -117,13 +141,15 @@ program vo2_2d
 contains
 
 
-
-
-
   function vo2_elocal(x,y) result(func)
     real(8) :: x,y
     real(8) :: func
+    real(8) :: a,b
     func = finter2d(vo2_ElocInter,x,y)
+    !
+    ! a=4d0
+    ! b=2d0
+    ! func = -a*(x**2+y**2) + b*(x**2+y**2)**2
   end function vo2_elocal
 
 
@@ -131,6 +157,8 @@ contains
   subroutine MC_vo2_2D(unit)
     integer                       :: unit
     real(8),dimension(Nx,Nx,2)    :: Lattice
+    !
+    real(8)                       :: rnd!(2) !theta,rho
     !
     real(8)                       :: rho,rnd_rho
     real(8)                       :: rho_flip
@@ -197,8 +225,6 @@ contains
     if(MpiMaster)call start_timer()
     do iter=1,Nsweep
        !
-       ! i = int_mersenne(1,Nx)
-       ! j = int_mersenne(1,Nx)
        do i=1,Nx
           do j=1,Nx
              !
@@ -219,7 +245,7 @@ contains
              x2_flip = rho_flip*sin( to_positive_angle(theta_flip))
              in_bool = (x1_flip<X1_max).AND.(X1_min<x1_flip).AND.(x2_flip< X2_max).AND.(X2_min<x2_flip)
              if(.not.in_bool)Nbrk = Nbrk+1
-             if(.not.in_bool)cycle
+             !if(.not.in_bool)cycle
              !
              E0         = Lattice_Eloc(Lattice,i,j)
              Eflip      = Lattice_Eloc(Lattice,i,j,[theta_flip,rho_flip])
@@ -227,7 +253,7 @@ contains
              !
              P = exp(-Ediff/Temp)
              !
-             if( min(1d0,P) > mersenne() ) then!.AND. in_bool
+             if( min(1d0,P) > mersenne() .AND. in_bool)then
                 Ene  = Ene + Ediff
                 Mag  = Mag - rho*[cos(theta),sin(theta)] + rho_flip*[cos(theta_flip),sin(theta_flip)]
                 Ang  = Ang - theta + theta_flip
@@ -253,7 +279,7 @@ contains
        enddo
        !
        if(MpiMaster)then
-          call eta(iter,Nsweep,step=5)
+          call eta(iter,Nsweep)
           call Print_Point(Lattice(myI,myJ,:),"mcVO2_PointGif",.false.)
        endif
     enddo
@@ -284,6 +310,8 @@ contains
        write(unit,*)temp,aMag,Ene,Ang,Len,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave,Nbrk
        write(*,"(A5,I0)")"Nbrk=",Nbrk
        write(*,"(A5,I0)")"Nave=",Nave
+       write(*,"(A5,I0)")"Nacc=",Nacc
+       write(*,"(A5,I0)")"Ntot=",(Nsweep-Nwarm)*Nlat
        write(*,"(A5,F21.12)")"Temp=",temp
        write(*,"(A5,F21.12)")"Mag =",aMag
        write(*,"(A5,F21.12)")"Ene =",Ene
@@ -312,7 +340,7 @@ contains
     do j=1,Nx
        do i=1,Nx
           lattice(i,j,1) = pi2*mersenne()
-          lattice(i,j,2) = 1d0!mersenne()
+          lattice(i,j,2) = 1d0!2d0*mersenne()
        enddo
     enddo
   end subroutine Init_Lattice
@@ -362,9 +390,11 @@ contains
     do k=1,4
        ThetaNN = Lattice(NstNbor(k,1),NstNbor(k,2),1)
        RhoNN   = Lattice(NstNbor(k,1),NstNbor(k,2),2)
-       Wfield  = Wfield - Jh*RhoNN*Rho*cos(thetaNN - theta)
+       Wfield  = Wfield - 2*Jh*RhoNN*Rho*cos(thetaNN - theta) + Jh*rhoNN**2
     enddo
-    E0     =  Wfield + lambda*vo2_elocal(rho*cos(theta),rho*sin(theta)) !the plus here is cause VO2 potential < 0
+    !
+    !Wfield = Wfield + Jh*4*rho**2
+    E0 =  Wfield  + lambda*vo2_elocal(rho*cos(theta),rho*sin(theta)) !the plus here is cause VO2 potential < 0
     !
   end function Lattice_Eloc
 
@@ -404,12 +434,15 @@ contains
     real(8),dimension(2) :: point
     character(len=*)     :: pfile
     logical              :: last
+    real(8)              :: rho,theta
     integer,save         :: iter=0
     !
     if(.not.last)then
        iter=iter+1
+       theta = to_positive_angle(point(1))
+       rho   = point(2)
        open(200,file=str(pfile)//".dat",access='append')
-       write(200,*)to_positive_angle(point(1)),point(2),vo2_elocal(point(2)*cos(to_positive_angle(point(1))),point(2)*sin(to_positive_angle(point(1))))
+       write(200,*)theta,rho,vo2_elocal(rho*cos(theta),rho*sin(theta))
        close(200)
        return
     endif
@@ -418,24 +451,38 @@ contains
     write(200,"(A)")"#set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
     write(200,"(A)")"#set output '"//str(pfile)//".gif'"
     write(200,"(A)")"set size square"
-    write(200,"(A)")"set pm3d map"
     write(200,"(A)")"unset key"
+    write(200,"(A)")"xf(r,phi) = r*cos(phi)"
+    write(200,"(A)")"yf(r,phi) = r*sin(phi)"
+    write(200,"(A)")""
+    write(200,"(A)")""
+    write(200,"(A)")"##Map plot"
+    write(200,"(A)")"set pm3d map"
+    write(200,"(A)")"do for [i=1:"//str(iter)//":1] {"
+    write(200,"(A)")"set title 'i='.i"   
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white'"
+    write(200,"(A)")"#,'"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"}"
+    write(200,"(A)")""
+    write(200,"(A)")""
+    write(200,"(A)")"##Surface plot"
     write(200,"(A)")"#set xrange [-2.2000:2.2000]"
     write(200,"(A)")"#set yrange [-2.8000:2.8000]"
     write(200,"(A)")"#set zrange [-0.2:0]"
-    write(200,"(A)")"xf(r,phi) = r*cos(phi)"
-    write(200,"(A)")"yf(r,phi) = r*sin(phi)"
-    write(200,"(A)")"set style arrow 1 head filled size screen 0.02,15,45 fixed lc rgb 'black'"
-    write(200,"(A)")"do for [i=1:"//str(iter)//":1] {"
-    write(200,"(A)")"set title 'i='.i"   
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' every ::i::i+1 using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white'"
-    write(200,"(A)")"#"
-    write(200,"(A)")"#Surface plot"
-    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d, 'mcVO2_PointGif.dat' every ::i::i+1 using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white'"
-    write(200,"(A)")"#"
-    write(200,"(A)")"#Vector-like plot"
-    write(200,"(A)")"#plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' every ::i::i+1  u (0):(0):(xf($2,$1)):(yf($2,$1)) with vectors as 1"
-    write(200,"(A)")"}"
+    write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
+    write(200,"(A)")"#set title 'i='.i"   
+    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white'"
+    write(200,"(A)")"##,'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
+
+    write(200,"(A)")"#}"
+    write(200,"(A)")""
+    write(200,"(A)")""
+    write(200,"(A)")"##Vector-like plot"
+    write(200,"(A)")"#set style arrow 1 head filled size screen 0.02,15,45 fixed lc rgb 'black'"
+    write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
+    write(200,"(A)")"#set title 'i='.i"   
+    write(200,"(A)")"#plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i  u (0):(0):(xf($2,$1)):(yf($2,$1)) with vectors as 1"
+    write(200,"(A)")"#}"
     close(200)
   end subroutine print_point
 
@@ -449,6 +496,7 @@ contains
     do i=1,Nx
        do j=1,Nx
           write(200,*)i,j,to_positive_angle(Lattice(i,j,1)),Lattice(i,j,2)
+          ! write(200,*)i,j,quadrant_reduction(Lattice(i,j,1)),Lattice(i,j,2)
        enddo
        write(200,*)""
     enddo
@@ -487,6 +535,7 @@ contains
     do i=1,Nx
        do j=1,Nx
           write(200,*)to_positive_angle(Lattice(i,j,1)),Lattice(i,j,2)
+          ! write(200,*)quadrant_reduction(Lattice(i,j,1)),Lattice(i,j,2)
        enddo
     enddo
     close(200)
@@ -521,6 +570,20 @@ contains
     if(angle<0d0)angle=angle+pi2
   end function to_positive_angle
 
+  function quadrant_reduction(theta) result(angle)
+    real(8) :: theta
+    real(8) :: angle
+    angle = to_positive_angle(theta)
+    if(angle>=0d0   .AND.angle<pi/2)then
+       return
+    elseif(angle>=pi/2  .AND.angle<pi)then
+       angle = pi-angle
+    elseif(angle>=pi    .AND.angle<3*pi/2)then
+       angle = angle-pi
+    elseif(angle>=3*pi/2.AND.angle<2*pi)then
+       angle = 2*pi - angle
+    end if
+  end function quadrant_reduction
 
 
 end program vo2_2d
