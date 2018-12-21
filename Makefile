@@ -9,7 +9,7 @@ INCARGS=$(shell pkg-config --cflags dmft_tools scifor)
 LIBARGS=$(shell pkg-config --libs   dmft_tools scifor)
 
 FFLAG = -O3 -faggressive-loop-optimizations -ffree-line-length-none
-DFLAG = -O0 -p -g -fimplicit-none -Wsurprising  -Waliasing -fwhole-file -fcheck=all -pedantic -fbacktrace -ffree-line-length-none
+DFLAG = -O0 -p -g -fimplicit-none -Wsurprising  -Waliasing -Wall -fwhole-file -fcheck=all -pedantic -fbacktrace -ffree-line-length-none
 
 
 all: all compile
