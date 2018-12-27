@@ -3,35 +3,42 @@ program vo2_2d
   USE MPI
   implicit none
 
-  real(8)                          :: Jh
-  real(8)                          :: lambda
-  integer                          :: Nx
-  integer                          :: Nsweep
-  integer                          :: Nwarm
-  integer                          :: Nmeas
-  integer                          :: seed
-  real(8)                          :: dx1
-  real(8)                          :: dx2
-  real(8)                          :: Temp
+  real(8)                            :: Jh
+  real(8)                            :: lambda
+  integer                            :: Nx
+  integer                            :: Nsweep
+  integer                            :: Nwarm
+  integer                            :: Nmeas
+  integer                            :: seed
+  integer                            :: MFit1
+  integer                            :: Mfit2
+  integer                            :: Rflip1
+  integer                            :: Rflip2
+  real(8)                            :: dx1
+  real(8)                            :: dx2
+  real(8)                            :: Temp
   !
-  integer                          :: i,j,unit
-  real(8),dimension(-22:22)        :: X1
-  real(8),dimension(-30:29)        :: X2
-  real(8),dimension(-22:22,-30:29) :: EnergyLocal
-  real(8)                          :: Emin,Emax
+  integer                            :: i,j,unit
+  real(8),dimension(-22:22)          :: X1
+  real(8),dimension(-30:29)          :: X2
+  real(8),dimension(-22:22,-30:29)   :: EnergyLocal
+  real(8)                            :: Emin,Emax
+  real(8)                            :: Alat
+  real(8)                            :: X1_min,X1_max
+  real(8)                            :: X2_min,X2_max
+  type(finter2d_type)                :: vo2_ElocInter
   !
-  real(8)                          :: Alat
-  real(8)                          :: X1_min,X1_max
-  real(8)                          :: X2_min,X2_max
-  type(finter2d_type)              :: vo2_ElocInter
+  real(8),allocatable,dimension(:)   :: ArrayX1
+  real(8),allocatable,dimension(:)   :: ArrayX2
+  real(8),allocatable,dimension(:,:) :: VO2_Potential
   !
   !
-  integer                          :: irank
-  integer                          :: MpiComm
-  integer                          :: MpiRank
-  integer                          :: MpiSize
-  logical                          :: MpiMaster
-  real(8),allocatable,dimension(:) :: MpiSeed
+  integer                            :: irank
+  integer                            :: MpiComm
+  integer                            :: MpiRank
+  integer                            :: MpiSize
+  logical                            :: MpiMaster
+  real(8),allocatable,dimension(:)   :: MpiSeed
 
   !
   !
@@ -48,6 +55,8 @@ program vo2_2d
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=4d0)
+  call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=1000)
+  call parse_input_variable(Mfit2,"MFit2","inputVO2.conf",default=1000)
   call parse_input_variable(dx1,"dx1","inputVO2.conf",default=0.1d0)
   call parse_input_variable(dx2,"dx2","inputVO2.conf",default=0.1d0)
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
@@ -103,7 +112,11 @@ program vo2_2d
   !
   call init_finter2d(vo2_ElocInter,X1,X2,EnergyLocal,3)
   !
-  call plot_potential(100,100)
+  !Build the pre-evaluated local potential
+  allocate(ArrayX1(Mfit1))
+  allocate(ArrayX2(Mfit2))
+  allocate(VO2_Potential(Mfit1,Mfit2))
+  call build_VO2_Potential(ArrayX1,ArrayX2,VO2_Potential)
 
   call mersenne_init(seed)
   if(MpiMaster)open(free_unit(unit),file="vo2_2d.dat",position='append')
@@ -121,44 +134,47 @@ contains
 
 
 
-  subroutine plot_potential(N1,N2)
-    integer :: N1,N2
-    real(8),dimension(N1) :: array1
-    real(8),dimension(N2) :: array2
-    real(8),dimension(N1,N2) :: potential
-    integer :: i1,i2
-    array1 = linspace(X1_min,X1_max,N1)
-    array2 = linspace(X2_min,X2_max,N2)
-    do i1=1,N1
-       do i2=1,N2
+
+  subroutine build_VO2_potential(array1,array2,potential)
+    real(8),dimension(Mfit1)       :: array1
+    real(8),dimension(Mfit2)       :: array2
+    real(8),dimension(Mfit1,Mfit2) :: potential
+    integer                        :: i1,i2
+    real(8)                        :: ddx1,ddx2
+    !
+    array1 = linspace(X1_min,X1_max,Mfit1,mesh=ddx1)
+    array2 = linspace(X2_min,X2_max,Mfit2,mesh=ddx2)
+    Rflip1 = nint(dx1/ddx1)
+    Rflip2 = nint(dx2/ddx2)
+    print*,Rflip1,Rflip2,Rflip1*ddx1,Rflip2*ddx2
+    do i1=1,Mfit1
+       do i2=1,Mfit2
           potential(i1,i2) = lambda*vo2_elocal(array1(i1),array2(i2))
        enddo
     enddo
-    call splot3d("VO2_local_fit.dat",array1,array2,potential)
-  end subroutine plot_potential
-
+    ! call splot3d("VO2_local_fit.dat",array1,array2,potential)
+    ! stop
+  end subroutine build_VO2_potential
 
   function vo2_elocal(x,y) result(func)
     real(8) :: x,y
     real(8) :: func
-    real(8) :: a,b
     !
     func = finter2d(vo2_ElocInter,x,y)
     !
-    ! a=4d0
-    ! b=2d0
-    ! func = -a*(x**2+y**2) + b*(x**2+y**2)**2
   end function vo2_elocal
 
 
+
   subroutine Init_Lattice(lattice)
-    real(8),dimension(Nx,Nx,2)    :: lattice
-    integer                       :: N,i,j
+    integer,dimension(Nx,Nx,2)    :: lattice
+    integer                       :: i,j
     !
     do j=1,Nx
        do i=1,Nx
-          lattice(i,j,1) = X1_min + (X1_max-X1_min)*mersenne()
-          lattice(i,j,2) = X2_min + (X2_max-X2_min)*mersenne()
+          lattice(i,j,1) = int_mersenne(1,Mfit1)
+          lattice(i,j,2) = int_mersenne(1,Mfit2)
+          !
        enddo
     enddo
   end subroutine Init_Lattice
@@ -166,7 +182,7 @@ contains
 
   function Lattice_Neighbors(i,j) result(neigh)
     integer,dimension(4,2)        :: neigh
-    integer                       :: i,j,k
+    integer                       :: i,j
     integer                       :: i_sx,i_dx
     integer                       :: j_up,j_dw
     !
@@ -183,43 +199,49 @@ contains
   end function Lattice_Neighbors
 
 
-  function Lattice_Eloc(Lattice,i,j,vec) result(E0)
-    real(8),dimension(Nx,Nx,2)    :: Lattice
+  function Lattice_Eloc(Lattice,i,j,flipd_indx) result(E0)
+    integer,dimension(Nx,Nx,2)    :: Lattice
     integer                       :: i,j
-    real(8),dimension(2),optional :: vec
+    integer,dimension(2),optional :: flipd_indx
     integer                       :: k
     real(8)                       :: E0,Wfield
+    integer                       :: i1,i2
     real(8)                       :: x1,x2
+    integer                       :: i1NN,i2NN
     real(8)                       :: x1NN,x2NN
-    real(8)                       :: theta,rho
-    real(8)                       :: thetaNN,rhoNN
     integer                       :: NstNbor(4,2)
     !
     NstNbor = Lattice_Neighbors(i,j)
     !
-    if(present(vec))then
-       X1 = vec(1)
-       X2 = vec(2)
+    if(present(flipd_indx))then
+       i1 = flipd_indx(1)
+       i2 = flipd_indx(2)
     else
-       X1 = Lattice(i,j,1)
-       X2 = Lattice(i,j,2)
+       i1 = Lattice(i,j,1)
+       i2 = Lattice(i,j,2)
     endif
+    !
+    x1 = arrayX1(i1)
+    x2 = arrayX2(i2)
     !
     Wfield = 0d0
     do k=1,4
-       x1NN = Lattice(NstNbor(k,1),NstNbor(k,2),1)
-       x2NN = Lattice(NstNbor(k,1),NstNbor(k,2),2)
+       i1NN = Lattice(NstNbor(k,1),NstNbor(k,2),1)
+       i2NN = Lattice(NstNbor(k,1),NstNbor(k,2),2)
+       x1NN = arrayX1(i1NN)
+       x2NN = arrayX2(i2NN)
        !
        Wfield  = Wfield + Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
     enddo
     !
-    E0     = Wfield  + ceiling(Alat**2)*lambda*vo2_elocal(x1,x2) !the plus here is cause VO2 potential < 0
+    ! E0     = Wfield  + ceiling(Alat**2)*lambda*vo2_elocal(x1,x2) !the plus here is cause VO2 potential < 0
+    E0     = Wfield  + ceiling(Alat**2)*VO2_potential(i1,i2) !the plus here is cause VO2 potential < 0
     !
   end function Lattice_Eloc
 
 
   function Lattice_Energy(Lattice) result(Ene)
-    real(8),dimension(Nx,Nx,2)    :: Lattice
+    integer,dimension(Nx,Nx,2)    :: Lattice
     real(8)                       :: Ene
     integer                       :: i,j
     !
@@ -233,15 +255,16 @@ contains
 
 
   function Lattice_Magnetization(Lattice) result(Mag)
-    real(8),dimension(Nx,Nx,2)    :: Lattice
-    real(8)                       :: Mag(2),x1,x2,rho,theta
+    integer,dimension(Nx,Nx,2)    :: Lattice
+    real(8)                       :: x1,x2
+    real(8)                       :: Mag(2)
     integer                       :: i,j
     !
     Mag=0d0
     do i=1,Nx
        do j=1,Nx
-          x1 = Lattice(i,j,1)
-          x2 = Lattice(i,j,2)
+          x1 = arrayX1(Lattice(i,j,1))
+          x2 = arrayX2(Lattice(i,j,2))
           Mag   = Mag + [x1,x2]
        enddo
     enddo
@@ -252,50 +275,39 @@ contains
 
   !MAIN MC PROCEDURE:
   subroutine MC_vo2_2D(unit)
-    integer                       :: unit
-    real(8),dimension(Nx,Nx,2)    :: Lattice
+    integer                    :: unit
+    integer,dimension(Nx,Nx,2) :: Lattice
     !
-    real(8)                       :: rnd(2) !theta,rho
-    !
-    real(8)                       :: rho,rnd_rho
-    real(8)                       :: rho_flip
-    !
-    real(8)                       :: theta,rnd_theta
-    real(8)                       :: theta_flip
-    !
-    real(8)                       :: x1,x2
-    real(8)                       :: x1_flip,x2_flip
-    real(8)                       :: E0
-    real(8)                       :: Eflip
-    real(8)                       :: Ediff
-    real(8)                       :: P
-    logical                       :: in_bool
+    integer                    :: i1,i2
+    real(8)                    :: x1,x2
+    integer                    :: i1_flip,i2_flip
+    real(8)                    :: x1_flip,x2_flip
+    real(8)                    :: E0
+    real(8)                    :: Eflip
+    real(8)                    :: Ediff
+    real(8)                    :: P
+    logical                    :: in_bool
     !    
-    integer                       :: Nacc
-    integer                       :: Nave
-    integer                       :: Nbrk
+    integer                    :: Nacc
+    integer                    :: Nave
+    integer                    :: Nbrk
     !
-    real(8)                       :: Ene,Mag(2)
-    real(8)                       :: CV,Chi
-    real(8)                       :: Ang,Len
+    real(8)                    :: Ene,Mag(2)
+    real(8)                    :: CV,Chi
     !
-    real(8)                       :: E_sum
-    real(8)                       :: Esq_sum
-    real(8)                       :: E_mean,E_mean_tmp
-    real(8)                       :: Esq_mean,Esq_mean_tmp
+    real(8)                    :: E_sum
+    real(8)                    :: Esq_sum
+    real(8)                    :: E_mean,E_mean_tmp
+    real(8)                    :: Esq_mean,Esq_mean_tmp
     !
-    real(8)                       :: aTheta,aRho
-    real(8)                       :: A_sum,A_mean,A_mean_tmp
-    real(8)                       :: L_sum,L_mean,L_mean_tmp
+    real(8)                    :: aMag
+    real(8)                    :: M_sum
+    real(8)                    :: Msq_sum
+    real(8)                    :: M_mean,M_mean_tmp
+    real(8)                    :: Msq_mean,Msq_mean_tmp
     !
-    real(8)                       :: aMag
-    real(8)                       :: M_sum
-    real(8)                       :: Msq_sum
-    real(8)                       :: M_mean,M_mean_tmp
-    real(8)                       :: Msq_mean,Msq_mean_tmp
-    !
-    integer                       :: iter,myI,myJ
-    integer                       :: i,j,k,N,Nlat
+    integer                    :: iter,myI,myJ
+    integer                    :: i,j,Nlat
     !
     !
     Nlat=Nx*Nx
@@ -321,19 +333,27 @@ contains
        do i=1,Nx
           do j=1,Nx
              !
-             x1 = Lattice(i,j,1)
-             x2 = Lattice(i,j,2)
+             i1 = Lattice(i,j,1)
+             i2 = Lattice(i,j,2)
+             x1 = arrayX1(i1)
+             x2 = arrayX2(i2)
              !
-             call mt_random(rnd)
-             x1_flip = x1 + dx1*(2*rnd(1)-1)
-             x2_flip = x2 + dx2*(2*rnd(2)-1)
+             i1_flip = i1 + int_mersenne(-Rflip1,Rflip1)
+             i2_flip = i2 + int_mersenne(-Rflip2,Rflip2)
              !
-             in_bool = (x1_flip<X1_max).AND.(X1_min<x1_flip).AND.(x2_flip< X2_max).AND.(X2_min<x2_flip)
-             if(.not.in_bool)Nbrk = Nbrk+1
+             in_bool = (i1_flip<Mfit1).AND.(1<i1_flip).AND.(i2_flip<Mfit2).AND.(1<i2_flip)
+             ! in_bool = (x1_flip<X1_max).AND.(X1_min<x1_flip).AND.(x2_flip< X2_max).AND.(X2_min<x2_flip)
+             if(.not.in_bool)then
+                Nbrk = Nbrk+1
+                cycle
+             endif
              !
-             E0         = Lattice_Eloc(Lattice,i,j)
-             Eflip      = Lattice_Eloc(Lattice,i,j,[x1_flip,x2_flip])
-             Ediff      = Eflip - E0
+             x1_flip = arrayX1(i1_flip)
+             x2_flip = arrayX2(i2_flip)
+             !
+             E0      = Lattice_Eloc(Lattice,i,j)
+             Eflip   = Lattice_Eloc(Lattice,i,j,[i1_flip,i2_flip])
+             Ediff   = Eflip - E0
              !
              P = exp(-Ediff/Temp)
              !
@@ -341,8 +361,8 @@ contains
                 Ene  = Ene + Ediff
                 Mag  = Mag - [x1,x2] + [x1_flip,x2_flip]
                 !
-                Lattice(i,j,1) = x1_flip
-                Lattice(i,j,2) = x2_flip
+                Lattice(i,j,1) = i1_flip
+                Lattice(i,j,2) = i2_flip
                 !
                 Nacc = Nacc + 1
              end if
@@ -404,14 +424,6 @@ contains
 
 
 
-
-  function to_positive_angle(theta) result(angle)
-    real(8) :: theta
-    real(8) :: angle
-    angle = mod(theta,pi2)
-    if(angle<0d0)angle=angle+pi2
-  end function to_positive_angle
-
   function get_theta(x1,x2) result(theta)
     real(8) :: x1,x2
     real(8) :: theta,thetap
@@ -433,7 +445,7 @@ contains
 
 
   subroutine print_lattice(lattice,pfile)
-    real(8),dimension(Nx,Nx,2) :: lattice
+    integer,dimension(Nx,Nx,2) :: lattice
     character(len=*)           :: pfile
     integer                    :: i,j
     real(8)                    :: rho,theta
@@ -441,8 +453,8 @@ contains
     open(200,file=str(pfile)//".dat")
     do i=1,Nx
        do j=1,Nx
-          rho = sqrt(Lattice(i,j,1)**2 + Lattice(i,j,2)**2)
-          theta=get_theta(Lattice(i,j,1),Lattice(i,j,2))
+          rho = sqrt(arrayX1(Lattice(i,j,1))**2 + arrayX2(Lattice(i,j,2))**2)
+          theta=get_theta(arrayX1(Lattice(i,j,1)),arrayX2(Lattice(i,j,2)))
           write(200,*)i,j,theta,rho
        enddo
        write(200,*)""
@@ -482,8 +494,9 @@ contains
     open(200,file=str(pfile)//"_vecIJ.dat")
     do i=1,Nx
        do j=1,Nx
-          rho = sqrt(Lattice(i,j,1)**2 + Lattice(i,j,2)**2)
-          theta=get_theta(Lattice(i,j,1),Lattice(i,j,2))
+          rho = sqrt(arrayX1(Lattice(i,j,1))**2 + arrayX2(Lattice(i,j,2))**2)
+          theta=get_theta(arrayX1(Lattice(i,j,1)),arrayX2(Lattice(i,j,2)))
+          !
           write(200,*)theta,rho
        enddo
     enddo
@@ -510,18 +523,18 @@ contains
 
 
   subroutine print_point(point,pfile,last)
-    real(8),dimension(2) :: point
+    integer,dimension(2) :: point
     character(len=*)     :: pfile
     logical              :: last
     real(8)              :: rho,theta
     integer,save         :: iter=0
     !
     if(.not.last)then
-       iter=iter+1
-       rho = sqrt(point(1)**2 + point(2)**2)
-       theta=get_theta(point(1),point(2))
+       iter = iter+1
+       rho  = sqrt(arrayX1(point(1))**2 + arrayX2(point(2))**2)
+       theta= get_theta(arrayX1(point(1)),arrayX2(point(2)))
        open(200,file=str(pfile)//".dat",access='append')
-       write(200,*)theta,rho,vo2_elocal(point(1),point(2))
+       write(200,*)theta,rho,vo2_potential(point(1),point(2))
        close(200)
        return
     endif
@@ -537,10 +550,10 @@ contains
     write(200,"(A)")""
     write(200,"(A)")"##Map plot"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"do for [i=1:"//str(iter)//":1] {"
+    write(200,"(A)")"do for [i=1:"//str(iter)//":10] {"
     write(200,"(A)")"set title 'i='.i"   
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white'"
-    write(200,"(A)")"#,'"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white','"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
+    ! write(200,"(A)")"#,'"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
     write(200,"(A)")"}"
     write(200,"(A)")""
     write(200,"(A)")""
@@ -550,8 +563,9 @@ contains
     write(200,"(A)")"#set zrange [-0.2:0]"
     write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
     write(200,"(A)")"#set title 'i='.i"   
-    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white'"
+    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white', 'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
     write(200,"(A)")"##,'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
+    ! write(200,"(A)")"##,'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
     write(200,"(A)")"#}"
     write(200,"(A)")""
     write(200,"(A)")""
