@@ -142,26 +142,25 @@ contains
     integer                        :: i1,i2
     real(8)                        :: ddx1,ddx2
     !
+    write(*,"(A)")"Building up the interpolated VO2-Phonon potential"
     array1 = linspace(X1_min,X1_max,Mfit1,mesh=ddx1)
     array2 = linspace(X2_min,X2_max,Mfit2,mesh=ddx2)
     Rflip1 = nint(dx1/ddx1)
     Rflip2 = nint(dx2/ddx2)
-    print*,Rflip1,Rflip2,Rflip1*ddx1,Rflip2*ddx2
+    write(*,"(A,I0,2x,I0)")"Rflips:",Rflip1,Rflip2
     do i1=1,Mfit1
        do i2=1,Mfit2
           potential(i1,i2) = lambda*vo2_elocal(array1(i1),array2(i2))
        enddo
     enddo
-    ! call splot3d("VO2_local_fit.dat",array1,array2,potential)
-    ! stop
+    write(*,"(A)")"Done"
+    write(*,"(A)")""
   end subroutine build_VO2_potential
 
   function vo2_elocal(x,y) result(func)
     real(8) :: x,y
     real(8) :: func
-    !
     func = finter2d(vo2_ElocInter,x,y)
-    !
   end function vo2_elocal
 
 
@@ -234,8 +233,7 @@ contains
        Wfield  = Wfield + Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
     enddo
     !
-    ! E0     = Wfield  + ceiling(Alat**2)*lambda*vo2_elocal(x1,x2) !the plus here is cause VO2 potential < 0
-    E0     = Wfield  + ceiling(Alat**2)*VO2_potential(i1,i2) !the plus here is cause VO2 potential < 0
+    E0     = Wfield  + ceiling(Alat**2)*VO2_potential(i1,i2)
     !
   end function Lattice_Eloc
 
@@ -277,6 +275,7 @@ contains
   subroutine MC_vo2_2D(unit)
     integer                    :: unit
     integer,dimension(Nx,Nx,2) :: Lattice
+    real(8)                    :: rnd(2)
     !
     integer                    :: i1,i2
     real(8)                    :: x1,x2
@@ -338,11 +337,11 @@ contains
              x1 = arrayX1(i1)
              x2 = arrayX2(i2)
              !
-             i1_flip = i1 + int_mersenne(-Rflip1,Rflip1)
-             i2_flip = i2 + int_mersenne(-Rflip2,Rflip2)
+             call mt_random(rnd)
+             i1_flip = i1-Rflip1 + floor(rnd(1)*(2*Rflip1+1))
+             i2_flip = i2-Rflip2 + floor(rnd(2)*(2*Rflip2+1))
              !
              in_bool = (i1_flip<Mfit1).AND.(1<i1_flip).AND.(i2_flip<Mfit2).AND.(1<i2_flip)
-             ! in_bool = (x1_flip<X1_max).AND.(X1_min<x1_flip).AND.(x2_flip< X2_max).AND.(X2_min<x2_flip)
              if(.not.in_bool)then
                 Nbrk = Nbrk+1
                 cycle
@@ -357,7 +356,7 @@ contains
              !
              P = exp(-Ediff/Temp)
              !
-             if( min(1d0,P) > mersenne() .AND. in_bool)then
+             if( min(1d0,P) > mersenne())then
                 Ene  = Ene + Ediff
                 Mag  = Mag - [x1,x2] + [x1_flip,x2_flip]
                 !
@@ -424,25 +423,6 @@ contains
 
 
 
-  function get_theta(x1,x2) result(theta)
-    real(8) :: x1,x2
-    real(8) :: theta,thetap
-    thetap = atan(abs(x2/x1))
-    if(x1>=0d0.AND.x2>=0d0)then
-       theta = thetap           !Q1
-    elseif(x1<0d0.AND.x2>0d0)then
-       theta = pi - thetap      !Q2
-    elseif(x1<0d0.AND.x2<0d0)then
-       theta = pi + thetap      !Q3
-    elseif(x1>0d0.AND.x2<0d0)then
-       theta = 2*pi - thetap    !Q4
-    end if
-  end function get_theta
-
-
-
-
-
 
   subroutine print_lattice(lattice,pfile)
     integer,dimension(Nx,Nx,2) :: lattice
@@ -471,8 +451,7 @@ contains
     !
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"AllPoints.pdf'"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, 'mcVO2_Lattice_vecIJ.dat' u (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
-    !
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' u (xf($4,$3)):(yf($4,$3)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
     !
     write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
     write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
@@ -482,43 +461,10 @@ contains
     write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
-    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:3 with image,'"//str(pfile)//".dat"//"' u ($1):($2):(xf($4*0.6,$3)):(yf($4*0.6,$3)) with vectors as 1"
-    !
-    write(200,"(A)")"set view map"
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Map.pdf'"
-    write(200,"(A)")"splot '"//str(pfile)//".dat"//"' u 1:2:(hsv2rgb($3/(2*pi), $4, 1)) with pm3d lc rgb variable"
+    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:3 with image, '"//str(pfile)//".dat' u ($1):($2):(xf($4*0.6,$3)):(yf($4*0.6,$3)) with vectors as 1"
     !
     close(200)
     !
-    !
-    open(200,file=str(pfile)//"_vecIJ.dat")
-    do i=1,Nx
-       do j=1,Nx
-          rho = sqrt(arrayX1(Lattice(i,j,1))**2 + arrayX2(Lattice(i,j,2))**2)
-          theta=get_theta(arrayX1(Lattice(i,j,1)),arrayX2(Lattice(i,j,2)))
-          !
-          write(200,*)theta,rho
-       enddo
-    enddo
-    close(200)
-    open(200,file="plot_"//str(pfile)//"_vecIJ.gp")
-    write(200,"(A)")"set term wxt"
-    write(200,"(A)")"#set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
-    write(200,"(A)")"#set output '"//str(pfile)//"_vecIJ.gif'"
-    write(200,"(A)")"set size square"
-    write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"unset key"
-    write(200,"(A)")"#set xrange [-2.2000:2.2000]"
-    write(200,"(A)")"#set yrange [-2.8000:2.8000]"
-    write(200,"(A)")"xf(r,phi) = r*cos(phi)"
-    write(200,"(A)")"yf(r,phi) = r*sin(phi)"
-    write(200,"(A)")"set style arrow 1 head filled size screen 0.02,15,45 fixed lc rgb 'black'"
-    write(200,"(A)")"do for [i=1:"//str(Nx*Nx-1)//":1] {"
-    write(200,"(A)")"set title 'i='.i"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"_vecIJ.dat' every ::i::i+1 using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white'"
-    write(200,"(A)")"#plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"_vecIJ.dat' every ::i::i+1  u (0):(0):(xf($2,$1)):(yf($2,$1)) with vectors as 1"
-    write(200,"(A)")"}"
-    close(200)
   end subroutine print_lattice
 
 
@@ -553,7 +499,6 @@ contains
     write(200,"(A)")"do for [i=1:"//str(iter)//":10] {"
     write(200,"(A)")"set title 'i='.i"   
     write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white','"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
-    ! write(200,"(A)")"#,'"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
     write(200,"(A)")"}"
     write(200,"(A)")""
     write(200,"(A)")""
@@ -564,17 +509,9 @@ contains
     write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
     write(200,"(A)")"#set title 'i='.i"   
     write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white', 'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
-    write(200,"(A)")"##,'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
-    ! write(200,"(A)")"##,'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
     write(200,"(A)")"#}"
     write(200,"(A)")""
     write(200,"(A)")""
-    write(200,"(A)")"##Vector-like plot"
-    write(200,"(A)")"#set style arrow 1 head filled size screen 0.02,15,45 fixed lc rgb 'black'"
-    write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
-    write(200,"(A)")"#set title 'i='.i"   
-    write(200,"(A)")"#plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i  u (0):(0):(xf($2,$1)):(yf($2,$1)) with vectors as 1"
-    write(200,"(A)")"#}"
     close(200)
   end subroutine print_point
 
@@ -583,7 +520,23 @@ contains
 
 
 
-end program vo2_2d
+  function get_theta(x1,x2) result(theta)
+    real(8) :: x1,x2
+    real(8) :: theta,thetap
+    thetap = atan(abs(x2/x1))
+    if(x1>=0d0.AND.x2>=0d0)then
+       theta = thetap           !Q1
+    elseif(x1<0d0.AND.x2>0d0)then
+       theta = pi - thetap      !Q2
+    elseif(x1<0d0.AND.x2<0d0)then
+       theta = pi + thetap      !Q3
+    elseif(x1>0d0.AND.x2<0d0)then
+       theta = 2*pi - thetap    !Q4
+    end if
+  end function get_theta
+
+
+end program
 
 
 
