@@ -16,9 +16,13 @@ program vo2_3d
   integer                            :: Rflip2
   real(8)                            :: dx1
   real(8)                            :: dx2
-  real(8)                            :: Temp
+  real(8)                            :: ITemp
+  real(8)                            :: DTemp
+  integer                            :: NTemp
+  logical                            :: wPoint
   !
-  integer                            :: i,j,unit
+  real(8)                            :: Temp
+  integer                            :: i,j,unit,it
   real(8),dimension(-22:22)          :: X1
   real(8),dimension(-30:29)          :: X2
   real(8),dimension(-22:22,-30:29)   :: EnergyLocal
@@ -54,12 +58,15 @@ program vo2_3d
   call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=10000)
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
-  call parse_input_variable(Temp,"Temp","inputVO2.conf",default=4d0)
+  call parse_input_variable(ITemp,"ITemp","inputVO2.conf",default=10d0)
+  call parse_input_variable(NTemp,"NTemp","inputVO2.conf",default=1)
+  call parse_input_variable(DTemp,"DTemp","inputVO2.conf",default=0d0)
   call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=1000)
   call parse_input_variable(Mfit2,"MFit2","inputVO2.conf",default=1000)
   call parse_input_variable(dx1,"dx1","inputVO2.conf",default=0.1d0)
   call parse_input_variable(dx2,"dx2","inputVO2.conf",default=0.1d0)
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
+  call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
   !
   allocate(MpiSeed(MpiSize))
@@ -119,8 +126,13 @@ program vo2_3d
   call build_VO2_Potential(ArrayX1,ArrayX2,VO2_Potential)
 
   call mersenne_init(seed)
-  if(MpiMaster)open(free_unit(unit),file="vo2_2d.dat",position='append')
-  call MC_vo2_3D(unit)
+  if(MpiMaster)open(free_unit(unit),file="vo2_3d.dat",position='append')
+
+  do it=1,Ntemp
+     Temp = ITemp + (it-1)*Dtemp
+     if(MpiMaster)write(*,"(A)")"Doing Temp="//str(Temp)
+     call MC_vo2_3D(unit)
+  enddo
   if(MpiMaster)close(unit)
   !
   call delete_finter2d(vo2_ElocInter)
@@ -273,7 +285,7 @@ contains
           do k=1,Nx
              x1 = arrayX1(Lattice(i,j,k,1))
              x2 = arrayX2(Lattice(i,j,k,2))
-             Mag   = Mag + [abs(x1),abs(x2)]
+             Mag   = Mag + [x1,x2]
           enddo
        enddo
     enddo
@@ -371,7 +383,7 @@ contains
                 !
                 if( min(1d0,P) > mersenne())then
                    Ene  = Ene + Ediff
-                   Mag  = Mag - [abs(x1),abs(x2)] + [abs(x1_flip),abs(x2_flip)]
+                   Mag  = Mag - [x1,x2] + [x1_flip,x2_flip]
                    !
                    Lattice(i,j,k,1) = i1_flip
                    Lattice(i,j,k,2) = i2_flip
@@ -393,42 +405,31 @@ contains
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
-          call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_PointGif",.false.)
+          if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.false.)
        endif
     enddo
     if(MpiMaster)call stop_timer
     !
-    E_mean_tmp = E_sum/Nave
-    M_mean_tmp = M_sum/Nave
-    Esq_mean_tmp = Esq_sum/Nave
-    Msq_mean_tmp = Msq_sum/Nave
+    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize
+    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize
+    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize
+    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize
     !
-    call AllReduce_MPI(MpiComm,E_mean_tmp,E_mean);E_mean=E_mean/MpiSize
-    call AllReduce_MPI(MpiComm,M_mean_tmp,M_mean);M_mean=M_Mean/MpiSize
-    call AllReduce_MPI(MpiComm,Esq_mean_tmp,Esq_mean);Esq_mean=Esq_mean/MpiSize
-    call AllReduce_MPI(MpiComm,Msq_mean_tmp,Msq_mean);Msq_mean=Msq_mean/MpiSize
-    !
-    aMag = abs(M_mean)/Nlat
-    Ene = E_mean/Nlat
-    Chi = (Msq_Mean - M_mean**2)/Temp/Nlat
-    Cv  = (Esq_mean - E_mean**2)/Temp**2/Nlat
+    aMag = abs(M_mean)/Nave/Nlat
+    Ene = E_mean/Nave/Nlat
+    Chi = (Msq_Mean/Nave - M_mean**2/Nave/Nave)/Temp/Nlat
+    Cv  = (Esq_mean/Nave - E_mean**2/Nave/Nave)/Temp/Temp/Nlat
     !
     if(MpiMaster)then
-       write(unit,*)temp,aMag,Ene,Cv,Chi,dble(Nacc)/Nlat/Nsweep,Nave,Nbrk
-       write(*,"(A,F21.12)")"Temp=",temp
-       write(*,"(A,F21.12)")"Lambda =",lambda
-       write(*,"(A,I0)")"Alat^2 =",ceiling(Alat**2)
-       write(*,"(A,I0)")"Nbrk=",Nbrk
-       write(*,"(A,I0)")"Nave=",Nave
-       write(*,"(A,I0)")"Nacc=",Nacc
-       write(*,"(A,I0)")"Ntot=",(Nsweep-Nwarm)*Nlat
-       write(*,"(A,2F21.12)")"Mag =",aMag,aMag/4d0
-       write(*,"(A,F21.12)")"Ene =",Ene
-       write(*,"(A,F21.12)")"Cv  =",Cv
-       write(*,"(A,F21.12)")"Chi =",Chi
+       write(unit,*)temp,aMag,Ene,Cv,Chi
+       write(*,"(A,F21.12)") "T =",temp
+       write(*,"(A,F21.12)")" M =",aMag
+       write(*,"(A,F21.12)") "E =",Ene
+       write(*,"(A,F21.12)") "C =",Cv
+       write(*,"(A,F21.12)") "X =",Chi
        !
-       call print_Lattice(Lattice,"mcVO2_Lattice")
-       call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_PointGif",.true.)
+       call print_Lattice(Lattice,"mcVO2_Temp"//str(Temp)//"_Lattice")
+       if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.true.)
     endif
     !
   end subroutine MC_vo2_3D
@@ -460,7 +461,9 @@ contains
     enddo
     close(200)
     open(200,file="plot_"//str(pfile)//".gp")
+    write(200,"(A)")"reset"
     write(200,"(A)")"set terminal postscript eps enhanced color font 'Times-Roman'"
+    write(200,"(A)")"reset"
     write(200,"(A)")"set size square"
     write(200,"(A)")"unset key"
     !
@@ -506,9 +509,11 @@ contains
        return
     endif
     open(200,file="plot_"//str(pfile)//".gp")
+    write(200,"(A)")"reset"
     write(200,"(A)")"set term wxt"
     write(200,"(A)")"#set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
     write(200,"(A)")"#set output '"//str(pfile)//".gif'"
+    write(200,"(A)")"reset"
     write(200,"(A)")"set size square"
     write(200,"(A)")"unset key"
     write(200,"(A)")"xf(r,phi) = r*cos(phi)"
