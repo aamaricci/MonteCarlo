@@ -16,13 +16,12 @@ program vo2_3d
   integer                            :: Rflip2
   real(8)                            :: dx1
   real(8)                            :: dx2
-  real(8)                            :: ITemp
-  real(8)                            :: DTemp
-  integer                            :: NTemp
+  real(8)                            :: Temp
+  character(len=100)                 :: TempFile
   logical                            :: wPoint
   !
-  real(8)                            :: Temp
-  integer                            :: i,j,unit,it
+  real(8),dimension(:),allocatable   :: TempList
+  integer                            :: i,j,unit,it,TempLen
   real(8),dimension(-22:22)          :: X1
   real(8),dimension(-30:29)          :: X2
   real(8),dimension(-22:22,-30:29)   :: EnergyLocal
@@ -31,6 +30,7 @@ program vo2_3d
   real(8)                            :: X1_min,X1_max
   real(8)                            :: X2_min,X2_max
   type(finter2d_type)                :: vo2_ElocInter
+  logical                            :: iobool
   !
   real(8),allocatable,dimension(:)   :: ArrayX1
   real(8),allocatable,dimension(:)   :: ArrayX2
@@ -58,9 +58,8 @@ program vo2_3d
   call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=10000)
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
-  call parse_input_variable(ITemp,"ITemp","inputVO2.conf",default=10d0)
-  call parse_input_variable(NTemp,"NTemp","inputVO2.conf",default=1)
-  call parse_input_variable(DTemp,"DTemp","inputVO2.conf",default=0d0)
+  call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
+  call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
   call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=1000)
   call parse_input_variable(Mfit2,"MFit2","inputVO2.conf",default=1000)
   call parse_input_variable(dx1,"dx1","inputVO2.conf",default=0.1d0)
@@ -124,12 +123,34 @@ program vo2_3d
   allocate(ArrayX2(Mfit2))
   allocate(VO2_Potential(Mfit1,Mfit2))
   call build_VO2_Potential(ArrayX1,ArrayX2,VO2_Potential)
-
+  !
+  !Init the MT rng
   call mersenne_init(seed)
-  if(MpiMaster)open(free_unit(unit),file="vo2_3d.dat",position='append')
 
-  do it=1,Ntemp
-     Temp = ITemp + (it-1)*Dtemp
+  !
+  !Read Temps
+  inquire(file=str(TempFile),exist=IObool)
+  if(IObool)then
+     write(*,"(A)")'Reading Temperatures from file'//str(TempFile)
+     TempLen = file_length(str(TempFile))
+     open(free_unit(unit),file=str(TempFile))
+     allocate(TempList(TempLen))
+     do it=1,TempLen
+        read(unit,*)TempList(it)
+        if(MpiMaster)write(*,"(A)")"Temp="//str(TempList(it))
+     enddo
+     close(unit)
+  else
+     TempLen=1
+     allocate(TempList(TempLen))
+     TempList(1) = Temp
+  endif
+  if(MpiMaster)write(*,"(A)")""  
+
+  !Start doing MC here:
+  if(MpiMaster)open(free_unit(unit),file="vo2_3d.dat",position='append')
+  do it=1,TempLen
+     Temp = TempList(it)
      if(MpiMaster)write(*,"(A)")"Doing Temp="//str(Temp)
      call MC_vo2_3D(unit)
   enddo
@@ -319,17 +340,20 @@ contains
     !
     real(8)                       :: E_sum
     real(8)                       :: Esq_sum
-    real(8)                       :: E_mean,E_mean_tmp
-    real(8)                       :: Esq_mean,Esq_mean_tmp
+    real(8)                       :: E_mean
+    real(8)                       :: Esq_mean
     !
     real(8)                       :: aMag
     real(8)                       :: M_sum
     real(8)                       :: Msq_sum
-    real(8)                       :: M_mean,M_mean_tmp
-    real(8)                       :: Msq_mean,Msq_mean_tmp
+    real(8)                       :: M_mean
+    real(8)                       :: Msq_mean
     !
     integer                       :: iter,myI,myJ,myK
     integer                       :: i,j,k,Nlat
+    !
+    real(8)                      :: data,Emin,Emax
+    type(pdf_kernel)             :: mc_pdf
     !
 
     Nlat=Nx*Nx*Nx
@@ -349,7 +373,9 @@ contains
     myI = int_mersenne(1,Nx)
     myJ = int_mersenne(1,Nx)
     myK = int_mersenne(1,Nx)
-    ! 
+    !
+    Emin = huge(1d0)
+    Emax = -huge(1d0)
     if(MpiMaster)call start_timer()
     do iter=1,Nsweep
        !
@@ -393,10 +419,15 @@ contains
                 !
                 if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
                    Nave    = Nave + 1
-                   E_sum   = E_sum + Ene
-                   M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
-                   Esq_sum = Esq_sum + Ene*Ene
-                   Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
+                   E_sum   = E_sum + Ene/Nlat
+                   M_sum   = M_sum + sqrt(dot_product(Mag/Nlat,Mag/Nlat))
+                   Esq_sum = Esq_sum + Ene*Ene/Nlat/Nlat
+                   Msq_Sum = Msq_Sum + dot_product(Mag/Nlat,Mag/Nlat)
+                   if(MpiMaster)then
+                      write(999,*)Ene/Nlat
+                      if(Ene/Nlat < Emin) Emin=Ene/Nlat
+                      if(Ene/Nlat > Emax) Emax=Ene/Nlat
+                   end if
                 endif
                 !
              enddo
@@ -410,26 +441,42 @@ contains
     enddo
     if(MpiMaster)call stop_timer
     !
-    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize
-    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize
-    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize
-    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize
+    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave
+    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave
+    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave
+    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave
     !
-    aMag = abs(M_mean)/Nave/Nlat
-    Ene = E_mean/Nave/Nlat
-    Chi = (Msq_Mean/Nave - M_mean**2/Nave/Nave)/Temp/Nlat
-    Cv  = (Esq_mean/Nave - E_mean**2/Nave/Nave)/Temp/Temp/Nlat
+    aMag = M_mean
+    Ene = E_mean
+    Chi = (Msq_Mean - M_mean**2)/Temp
+    Cv  = (Esq_mean - E_mean**2)/Temp/Temp
     !
     if(MpiMaster)then
-       write(unit,*)temp,aMag,Ene,Cv,Chi
+       write(unit,*)temp,aMag,Ene,Cv,Chi,Nave
        write(*,"(A,F21.12)") "T =",temp
-       write(*,"(A,F21.12)")" M =",aMag
+       write(*,"(A,F21.12)") "M =",aMag
        write(*,"(A,F21.12)") "E =",Ene
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
+       write(*,"(A,I0)")     "Na=",Nave
        !
        call print_Lattice(Lattice,"mcVO2_Temp"//str(Temp)//"_Lattice")
        if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.true.)
+       call pdf_allocate(mc_pdf,500)
+       call pdf_set_sigma(mc_pdf,(Esq_mean-E_mean**2),Nave)
+       call pdf_set_range(mc_pdf,Emin-1d0,Emax+1d0)
+       rewind(999)
+       call start_timer()
+       do i=1,Nave
+          read(999,*)data
+          call pdf_accumulate(mc_pdf,data)
+          call eta(i,Nave)
+       enddo
+       call stop_timer()
+       call pdf_print(mc_pdf,"mc_PDF_E.dat")
+       call pdf_print_moments(mc_pdf,"mc_Moments_PDF_E.dat")
+       call pdf_deallocate(mc_pdf)
+       write(*,"(A)")""  
     endif
     !
   end subroutine MC_vo2_3D
@@ -446,16 +493,14 @@ contains
     real(8)                       :: rho,theta,x1,x2
     !
     open(200,file=str(pfile)//".dat")
+    k = int_mersenne(1,Nx)
     do i=1,Nx
        do j=1,Nx
-          do k=1,Nx
-             x1   = arrayX1(Lattice(i,j,k,1))
-             x2   = arrayX2(Lattice(i,j,k,2))
-             rho  = sqrt(x1**2 + x2**2)
-             theta= get_theta(x1,x2)
-             write(200,*)i,j,k,theta,rho
-          enddo
-          write(200,*)""
+          x1   = arrayX1(Lattice(i,j,k,1))
+          x2   = arrayX2(Lattice(i,j,k,2))
+          rho  = sqrt(x1**2 + x2**2)
+          theta= get_theta(x1,x2)
+          write(200,*)i,j,k,theta,rho
        enddo
        write(200,*)""
     enddo
@@ -484,8 +529,8 @@ contains
     write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
-    write(200,"(A)")"k="//str(Nx/2)
-    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' every ::k::k u 1:2:4 with image, '"//str(pfile)//".dat' every ::k::k u 1:2:(xf($5*scale,$4)):(yf($5*scale,$4)) with vectors as 1"
+    write(200,"(A)")"k="//str(k)
+    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:4 with image, '"//str(pfile)//".dat' u 1:2:(xf($5*scale,$4)):(yf($5*scale,$4)) with vectors as 1"
     !
     close(200)
     !

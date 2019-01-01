@@ -1,5 +1,6 @@
 HERE= `pwd`
-EXE=mc_VO2_3d
+EXE2d=mc_VO2_2d
+EXE3d=mc_VO2_3d
 
 OBJS= 
 
@@ -22,11 +23,12 @@ debug: FFLAG=$(DFLAG)
 
 compile: $(OBJS)
 	@echo " ..................... compile ........................... "
-	$(FC) $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE) $(LIBARGS)
+	$(FC) $(FFLAG) $(INCARGS) $(OBJS) $(EXE2d).f90 -o ~/.bin/$(EXE2d) $(LIBARGS)
+	$(FC) $(FFLAG) $(INCARGS) $(OBJS) $(EXE3d).f90 -o ~/.bin/$(EXE3d) $(LIBARGS)
 	@echo " ...................... done .............................. "
 	@echo ""
 	@echo ""
-	@echo "created" ~/.bin/$(EXE)
+	@echo "created" ~/.bin/$(EXE2d) "and" ~/.bin/$(EXE3d)
 
 clean: 
 	@echo "Cleaning:"
