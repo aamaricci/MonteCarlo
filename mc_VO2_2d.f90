@@ -55,8 +55,13 @@ program vo2_2d
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
   call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
   call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=10000)
+#ifdef _SITE
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=2,comment="In units of 10**6")
+  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=5000)
+#else
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=20000,comment="In units of 10**4")
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
+#endif
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
   call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
@@ -67,6 +72,11 @@ program vo2_2d
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
+#ifdef _SITE
+  Nsweep=Nsweep*10**6
+#else
+  Nsweep=Nsweep*10**4
+#endif
   !
   allocate(MpiSeed(MpiSize))
   call random_number(MpiSeed)
@@ -145,7 +155,7 @@ program vo2_2d
      TempList(1) = Temp
   endif
   if(MpiMaster)write(*,"(A)")""  
-  
+
   !Start doing MC here:
   if(MpiMaster)open(free_unit(unit),file="vo2_2d.dat",position='append')
   do it=1,TempLen
@@ -361,6 +371,10 @@ contains
     M_sum    = 0d0
     Esq_sum  = 0d0
     Msq_sum  = 0d0
+    E_mean   = 0d0
+    M_mean   = 0d0
+    Esq_mean = 0d0
+    Msq_mean = 0d0
     myI = mt_uniform(1,Nx)
     myJ = mt_uniform(1,Nx)
     !
@@ -375,10 +389,15 @@ contains
     endif
     !
     if(MpiMaster)call start_timer()
-    do iter=1,Nsweep
+    MCsweep: do iter=1,Nsweep
        !
+#ifdef _SITE
+       i = mt_uniform(1,Nx)
+       j = mt_uniform(1,Nx)
+#else
        do i=1,Nx
           do j=1,Nx
+#endif
              !
              i1 = Lattice(i,j,1)
              i2 = Lattice(i,j,2)
@@ -430,14 +449,18 @@ contains
                 end if
              endif
              !
+#ifdef _SITE
+             !
+#else
           enddo
        enddo
+#endif       
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
           if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.false.)
        endif
-    enddo
+    enddo MCsweep
     if(MpiMaster)call stop_timer
     !
     call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave
@@ -477,9 +500,11 @@ contains
        call stop_timer()
        call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
+       call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
        call pdf_deallocate(ene_pdf)
        !
        call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+       call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
        call pdf_deallocate(lat_pdf)
        write(*,"(A)")""  
     endif
