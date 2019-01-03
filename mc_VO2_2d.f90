@@ -203,8 +203,8 @@ contains
     !
     do j=1,Nx
        do i=1,Nx
-          lattice(i,j,1) = int_mersenne(1,Mfit1)
-          lattice(i,j,2) = int_mersenne(1,Mfit2)
+          lattice(i,j,1) = mt_uniform(1,Mfit1)
+          lattice(i,j,2) = mt_uniform(1,Mfit2)
           !
        enddo
     enddo
@@ -234,7 +234,7 @@ contains
     integer,dimension(Nx,Nx,2)    :: Lattice
     integer                       :: i,j
     integer,dimension(2),optional :: flipd_indx
-    integer                       :: k
+    integer                       :: in
     real(8)                       :: E0,Wfield
     integer                       :: i1,i2
     real(8)                       :: x1,x2
@@ -256,9 +256,9 @@ contains
     x2 = arrayX2(i2)
     !
     Wfield = 0d0
-    do k=1,4
-       i1NN = Lattice(NstNbor(k,1),NstNbor(k,2),1)
-       i2NN = Lattice(NstNbor(k,1),NstNbor(k,2),2)
+    do in=1,4
+       i1NN = Lattice(NstNbor(in,1),NstNbor(in,2),1)
+       i2NN = Lattice(NstNbor(in,1),NstNbor(in,2),2)
        x1NN = arrayX1(i1NN)
        x2NN = arrayX2(i2NN)
        !
@@ -340,8 +340,10 @@ contains
     integer                    :: iter,myI,myJ
     integer                    :: i,j,Nlat
     !
-    real(8)                    :: data,Emin,Emax
-    type(pdf_kernel)           :: mc_pdf
+    real(8)                    :: data,Emin,Emax,ene_sigma
+    type(pdf_kernel)           :: ene_pdf
+    type(pdf_kernel_2d)        :: lat_pdf
+    real(8),dimension(2,2)     :: lat_sigma
     !
     !
     !
@@ -359,11 +361,19 @@ contains
     M_sum    = 0d0
     Esq_sum  = 0d0
     Msq_sum  = 0d0
-    myI = int_mersenne(1,Nx)
-    myJ = int_mersenne(1,Nx)
+    myI = mt_uniform(1,Nx)
+    myJ = mt_uniform(1,Nx)
     !
-    Emin = huge(1d0)
-    Emax = -huge(1d0)
+    if(MpiMaster)then
+       Emin = huge(1d0)
+       Emax = -huge(1d0)
+       !
+       call pdf_allocate(lat_pdf,[100,100])
+       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+       lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+       call pdf_push_sigma(lat_pdf,lat_sigma)
+    endif
+    !
     if(MpiMaster)call start_timer()
     do iter=1,Nsweep
        !
@@ -414,6 +424,9 @@ contains
                    write(999,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
+                   !
+                   call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
+                   !
                 end if
              endif
              !
@@ -422,7 +435,7 @@ contains
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
-          if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.false.)
+          if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.false.)
        endif
     enddo
     if(MpiMaster)call stop_timer
@@ -446,23 +459,28 @@ contains
        write(*,"(A,F21.12)") "X =",Chi
        write(*,"(A,I0)")     "Na=",Nave
        !
-       call print_Lattice(Lattice,"mcVO2_Temp"//str(Temp)//"_Lattice")
-       if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.true.)
+       call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp))
+       if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.true.)
+       call pdf_allocate(ene_pdf,500)
+       call pdf_set_range(ene_pdf,Emin-1d0,Emax+1d0)
+       call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
+       call pdf_push_sigma(ene_pdf,ene_sigma)
 
-       call pdf_allocate(mc_pdf,500)
-       call pdf_set_sigma(mc_pdf,(Esq_mean-E_mean**2),Nave)
-       call pdf_set_range(mc_pdf,Emin-1d0,Emax+1d0)
        rewind(999)
        call start_timer()
        do i=1,Nave
           read(999,*)data
-          call pdf_accumulate(mc_pdf,data)
+          call pdf_accumulate(ene_pdf,data)
           call eta(i,Nave)
        enddo
+       call system("rm -fv fort.999")
        call stop_timer()
-       call pdf_print(mc_pdf,"mc_PDF_E.dat")
-       call pdf_print_moments(mc_pdf,"mc_Moments_PDF_E.dat")
-       call pdf_deallocate(mc_pdf)
+       call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
+       call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
+       call pdf_deallocate(ene_pdf)
+       !
+       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+       call pdf_deallocate(lat_pdf)
        write(*,"(A)")""  
     endif
     !
@@ -500,7 +518,7 @@ contains
     write(200,"(A)")"yf(r,phi) = r*sin(phi)"
     write(200,"(A)")"set style arrow 1 head filled size screen 0.01,15,45 fixed lc rgb 'black'"
     !
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"AllPoints.pdf'"
+    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"_AllPoints.pdf'"
     write(200,"(A)")"set pm3d map"
     write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' u (xf($4,$3)):(yf($4,$3)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
     !
@@ -511,7 +529,7 @@ contains
     write(200,"(A)")"set ytics 5"
     write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
+    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"_Vec.pdf'"
     write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:3 with image, '"//str(pfile)//".dat' u ($1):($2):(xf($4*0.6,$3)):(yf($4*0.6,$3)) with vectors as 1"
     !
     close(200)

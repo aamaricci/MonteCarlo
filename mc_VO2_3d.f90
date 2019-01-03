@@ -205,8 +205,8 @@ contains
     do k=1,Nx
        do j=1,Nx
           do i=1,Nx
-             lattice(i,j,k,1) = int_mersenne(1,Mfit1)
-             lattice(i,j,k,2) = int_mersenne(1,Mfit2)
+             lattice(i,j,k,1) = mt_uniform(1,Mfit1)
+             lattice(i,j,k,2) = mt_uniform(1,Mfit2)
              !
           enddo
        enddo
@@ -352,8 +352,10 @@ contains
     integer                       :: iter,myI,myJ,myK
     integer                       :: i,j,k,Nlat
     !
-    real(8)                      :: data,Emin,Emax
-    type(pdf_kernel)             :: mc_pdf
+    real(8)                    :: data,Emin,Emax,ene_sigma
+    type(pdf_kernel)           :: ene_pdf
+    type(pdf_kernel_2d)        :: lat_pdf
+    real(8),dimension(2,2)     :: lat_sigma
     !
 
     Nlat=Nx*Nx*Nx
@@ -370,12 +372,20 @@ contains
     M_sum    = 0d0
     Esq_sum  = 0d0
     Msq_sum  = 0d0
-    myI = int_mersenne(1,Nx)
-    myJ = int_mersenne(1,Nx)
-    myK = int_mersenne(1,Nx)
+    myI = mt_uniform(1,Nx)
+    myJ = mt_uniform(1,Nx)
+    myK = mt_uniform(1,Nx)
     !
-    Emin = huge(1d0)
-    Emax = -huge(1d0)
+    if(MpiMaster)then
+       Emin = huge(1d0)
+       Emax = -huge(1d0)
+       !
+       call pdf_allocate(lat_pdf,[100,100])
+       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+       lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+       call pdf_push_sigma(lat_pdf,lat_sigma)
+    endif
+    !
     if(MpiMaster)call start_timer()
     do iter=1,Nsweep
        !
@@ -427,7 +437,8 @@ contains
                       write(999,*)Ene/Nlat
                       if(Ene/Nlat < Emin) Emin=Ene/Nlat
                       if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                   end if
+                      call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
+                   endif
                 endif
                 !
              enddo
@@ -436,7 +447,7 @@ contains
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
-          if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.false.)
+          if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.false.)
        endif
     enddo
     if(MpiMaster)call stop_timer
@@ -460,22 +471,28 @@ contains
        write(*,"(A,F21.12)") "X =",Chi
        write(*,"(A,I0)")     "Na=",Nave
        !
-       call print_Lattice(Lattice,"mcVO2_Temp"//str(Temp)//"_Lattice")
-       if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mcVO2_Temp"//str(Temp)//"_PointGif",.true.)
-       call pdf_allocate(mc_pdf,500)
-       call pdf_set_sigma(mc_pdf,(Esq_mean-E_mean**2),Nave)
-       call pdf_set_range(mc_pdf,Emin-1d0,Emax+1d0)
+       call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//".dat")
+       if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.true.)
+       call pdf_allocate(ene_pdf,500)
+       call pdf_set_range(ene_pdf,Emin-1d0,Emax+1d0)
+       call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
+       call pdf_push_sigma(ene_pdf,ene_sigma)
+
        rewind(999)
        call start_timer()
        do i=1,Nave
           read(999,*)data
-          call pdf_accumulate(mc_pdf,data)
+          call pdf_accumulate(ene_pdf,data)
           call eta(i,Nave)
        enddo
+       call system("rm -fv fort.999")
        call stop_timer()
-       call pdf_print(mc_pdf,"mc_PDF_E.dat")
-       call pdf_print_moments(mc_pdf,"mc_Moments_PDF_E.dat")
-       call pdf_deallocate(mc_pdf)
+       call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
+       call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
+       call pdf_deallocate(ene_pdf)
+       !
+       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+       call pdf_deallocate(lat_pdf)
        write(*,"(A)")""  
     endif
     !
@@ -493,7 +510,7 @@ contains
     real(8)                       :: rho,theta,x1,x2
     !
     open(200,file=str(pfile)//".dat")
-    k = int_mersenne(1,Nx)
+    k = mt_uniform(1,Nx)
     do i=1,Nx
        do j=1,Nx
           x1   = arrayX1(Lattice(i,j,k,1))

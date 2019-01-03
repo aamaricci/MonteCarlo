@@ -28,7 +28,8 @@ compile: $(OBJS)
 	@echo " ...................... done .............................. "
 	@echo ""
 	@echo ""
-	@echo "created" ~/.bin/$(EXE2d) "and" ~/.bin/$(EXE3d)
+	@echo "created" ~/.bin/$(EXE2d)
+	@echo "created" ~/.bin/$(EXE3d)
 
 clean: 
 	@echo "Cleaning:"
