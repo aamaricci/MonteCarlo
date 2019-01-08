@@ -15,7 +15,7 @@ all: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
 	@echo "Compile: mc_LATTICE:"
-	$(FC) $(FPPFLAG) -D_ $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_mclat $(LIBARGS)
+	$(FC) $(FPPFLAG) -D_ $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE) $(LIBARGS)
 	@echo ""
 	@echo "created" ~/.bin/$(EXE)
 	@echo " ...................... done .............................. "
@@ -24,7 +24,7 @@ debug: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
 	@echo "Compile: mc_LATTICE DEBUG:"
-	$(FC) $(FPPFLAG) -D_ $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_mclat_debug $(LIBARGS)
+	$(FC) $(FPPFLAG) -D_ $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_debug $(LIBARGS)
 	@echo ""
 	@echo "created" ~/.bin/$(EXE)_debug
 	@echo " ...................... done .............................. "
@@ -34,7 +34,7 @@ site: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
 	@echo "Compile: mc_SINGLE_SITE:"
-	$(FC) $(FPPFLAG) -D_SITE $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE) $(LIBARGS)
+	$(FC) $(FPPFLAG) -D_SITE $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_site $(LIBARGS)
 	@echo ""
 	@echo "created" ~/.bin/$(EXE)_site
 	@echo " ...................... done .............................. "
@@ -46,7 +46,7 @@ site_debug: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
 	@echo "Compile: mc_SINGLE_SITE DEBUG:"
-	$(FC) $(FPPFLAG) -D_SITE $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_debug $(LIBARGS)
+	$(FC) $(FPPFLAG) -D_SITE $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_site_debug $(LIBARGS)
 	@echo ""
 	@echo "created" ~/.bin/$(EXE)_site_debug
 	@echo " ...................... done .............................. "
