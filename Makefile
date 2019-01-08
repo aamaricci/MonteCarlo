@@ -1,6 +1,5 @@
 HERE= `pwd`
-EXE2d=mc_VO2_2d
-EXE3d=mc_VO2_3d
+EXE=mc_VO2_3d
 
 OBJS= 
 
@@ -15,63 +14,41 @@ FPPFLAG =-cpp
 all: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
-	@echo "Compile: 2D mc_SINGLE_SITE:"
-	$(FC) $(FPPFLAG) -D_SITE $(FFLAG) $(INCARGS) $(OBJS) $(EXE2d).f90 -o ~/.bin/$(EXE2d) $(LIBARGS)
+	@echo "Compile: mc_LATTICE:"
+	$(FC) $(FPPFLAG) -D_ $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_mclat $(LIBARGS)
 	@echo ""
-	@echo "created" ~/.bin/$(EXE2d)
-	@echo ""
-	@echo "Compile: 3D mc_SINGLE_SITE:"
-	$(FC) $(FPPFLAG) -D_SITE $(FFLAG) $(INCARGS) $(OBJS) $(EXE3d).f90 -o ~/.bin/$(EXE3d) $(LIBARGS)
-	@echo ""
-	@echo "created" ~/.bin/$(EXE3d)
-	@echo ""
+	@echo "created" ~/.bin/$(EXE)
 	@echo " ...................... done .............................. "
-
-lattice: $(OBJS)
-	@echo " ..................... compile ........................... "
-	@echo ""
-	@echo "Compile: 2D mc_LATTICE:"
-	$(FC) $(FPPFLAG) -D_ $(FFLAG) $(INCARGS) $(OBJS) $(EXE2d).f90 -o ~/.bin/$(EXE2d)_mclat $(LIBARGS)
-	@echo ""
-	@echo "created" ~/.bin/$(EXE2d)_mclat
-	@echo ""
-	@echo "Compile: 3D mc_LATTICE:"
-	$(FC) $(FPPFLAG) -D_ $(FFLAG) $(INCARGS) $(OBJS) $(EXE3d).f90 -o ~/.bin/$(EXE3d)_mclat $(LIBARGS)
-	@echo ""
-	@echo "created" ~/.bin/$(EXE3d)_mclat
-	@echo ""
-	@echo " ...................... done .............................. "
-
 
 debug: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
-	@echo "Compile: 2D mc_SINGLE_SITE DEBUG:"
-	$(FC) $(FPPFLAG) -D_SITE $(DFLAG) $(INCARGS) $(OBJS) $(EXE2d).f90 -o ~/.bin/$(EXE2d)_debug $(LIBARGS)
+	@echo "Compile: mc_LATTICE DEBUG:"
+	$(FC) $(FPPFLAG) -D_ $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_mclat_debug $(LIBARGS)
 	@echo ""
-	@echo "created" ~/.bin/$(EXE2d)_debug
-	@echo ""
-	@echo "Compile: 3D mc_SINGLE_SITE DEBUG:"
-	$(FC) $(FPPFLAG) -D_SITE $(DFLAG) $(INCARGS) $(OBJS) $(EXE3d).f90 -o ~/.bin/$(EXE3d)_debug $(LIBARGS)
-	@echo ""
-	@echo "created" ~/.bin/$(EXE3d)_debug
-	@echo ""
+	@echo "created" ~/.bin/$(EXE)_debug
 	@echo " ...................... done .............................. "
 
 
-lattice_debug: $(OBJS)
+site: $(OBJS)
 	@echo " ..................... compile ........................... "
 	@echo ""
-	@echo "Compile: 2D mc_LATTICE DEBUG:"
-	$(FC) $(FPPFLAG) -D_ $(DFLAG) $(INCARGS) $(OBJS) $(EXE2d).f90 -o ~/.bin/$(EXE2d)_mclat_debug $(LIBARGS)
+	@echo "Compile: mc_SINGLE_SITE:"
+	$(FC) $(FPPFLAG) -D_SITE $(FFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE) $(LIBARGS)
 	@echo ""
-	@echo "created" ~/.bin/$(EXE2d)_mclat_debug
+	@echo "created" ~/.bin/$(EXE)_site
+	@echo " ...................... done .............................. "
+
+
+
+
+site_debug: $(OBJS)
+	@echo " ..................... compile ........................... "
 	@echo ""
-	@echo "Compile: 3D mc_LATTICE DEBUG:"
-	$(FC) $(FPPFLAG) -D_ $(DFLAG) $(INCARGS) $(OBJS) $(EXE3d).f90 -o ~/.bin/$(EXE3d)_mclat_debug $(LIBARGS)
+	@echo "Compile: mc_SINGLE_SITE DEBUG:"
+	$(FC) $(FPPFLAG) -D_SITE $(DFLAG) $(INCARGS) $(OBJS) $(EXE).f90 -o ~/.bin/$(EXE)_debug $(LIBARGS)
 	@echo ""
-	@echo "created" ~/.bin/$(EXE3d)_mclat_debug
-	@echo ""
+	@echo "created" ~/.bin/$(EXE)_site_debug
 	@echo " ...................... done .............................. "
 
 clean: 

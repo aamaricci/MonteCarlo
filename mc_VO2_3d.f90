@@ -55,13 +55,10 @@ program vo2_3d
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
   call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
   call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
-#ifdef _SITE
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=2,comment="In units of 10**6")
-  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=5000)
-#else
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=20000,comment="In units of 10**4")
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=2,comment="In units of 10**3")
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
-#endif
+  call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
+  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
   call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
@@ -72,11 +69,8 @@ program vo2_3d
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
-#ifdef _SITE
-  Nsweep=Nsweep*10**6
-#else
-  Nsweep=Nsweep*10**4
-#endif
+  !
+  Nsweep=Nsweep*10**3
   !
   allocate(MpiSeed(MpiSize))
   call random_number(MpiSeed)
@@ -217,7 +211,6 @@ contains
           do i=1,Nx
              lattice(i,j,k,1) = mt_uniform(1,Mfit1)
              lattice(i,j,k,2) = mt_uniform(1,Mfit2)
-             !
           enddo
        enddo
     enddo
@@ -327,45 +320,48 @@ contains
 
   !MAIN MC PROCEDURE:
   subroutine MC_vo2_3D(unit)
-    integer                       :: unit
-    integer,dimension(Nx,Nx,Nx,2) :: Lattice
-    real(8)                       :: rnd(2)
+    integer                        :: unit
+    integer,dimension(Nx,Nx,Nx,2)  :: Lattice
+    real(8)                        :: rnd(2)
     !
-    integer                       :: i1,i2
-    real(8)                       :: x1,x2
-    integer                       :: i1_flip,i2_flip
-    real(8)                       :: x1_flip,x2_flip
-    real(8)                       :: E0
-    real(8)                       :: Eflip
-    real(8)                       :: Ediff
-    real(8)                       :: P
-    logical                       :: in_bool
+    integer                        :: i1,i2
+    real(8)                        :: x1,x2
+    integer                        :: i1_flip,i2_flip
+    real(8)                        :: x1_flip,x2_flip
+    real(8)                        :: E0
+    real(8)                        :: Eflip
+    real(8)                        :: Ediff
+    real(8)                        :: P
+    logical                        :: in_bool
     !    
-    integer                       :: Nacc
-    integer                       :: Nave
-    integer                       :: Nbrk
+    integer                        :: Nacc
+    integer                        :: Nave
+    integer                        :: Nbrk
     !
-    real(8)                       :: Ene,Mag(2)
-    real(8)                       :: CV,Chi
+    real(8)                        :: Ene,Mag(2)
+    real(8)                        :: CV,Chi
     !
-    real(8)                       :: E_sum
-    real(8)                       :: Esq_sum
-    real(8)                       :: E_mean
-    real(8)                       :: Esq_mean
+    real(8)                        :: E_sum
+    real(8)                        :: Esq_sum
+    real(8)                        :: E_mean
+    real(8)                        :: Esq_mean
     !
-    real(8)                       :: aMag
-    real(8)                       :: M_sum
-    real(8)                       :: Msq_sum
-    real(8)                       :: M_mean
-    real(8)                       :: Msq_mean
+    real(8)                        :: aMag
+    real(8)                        :: M_sum
+    real(8)                        :: Msq_sum
+    real(8)                        :: M_mean
+    real(8)                        :: Msq_mean
     !
-    integer                       :: iter,myI,myJ,myK
-    integer                       :: i,j,k,Nlat
+    integer                        :: iter,myI,myJ,myK
+    integer                        :: i,j,k,Nlat
     !
-    real(8)                       :: data,Emin,Emax,ene_sigma
-    type(pdf_kernel)              :: ene_pdf
-    type(pdf_kernel_2d)           :: lat_pdf
-    real(8),dimension(2,2)        :: lat_sigma
+    real(8)                        :: data,Emin,Emax,ene_sigma
+    integer,parameter              :: Npdf1=500,Npdf2=100
+    real(8),dimension(Npdf1)       :: ene_pdf_tmp
+    real(8),dimension(Npdf2,Npdf2) :: lat_pdf_tmp
+    type(pdf_kernel)               :: ene_pdf
+    type(pdf_kernel_2d)            :: lat_pdf
+    real(8),dimension(2,2)         :: lat_sigma
     !
 
     Nlat=Nx*Nx*Nx
@@ -390,15 +386,15 @@ contains
     myJ = mt_uniform(1,Nx)
     myK = mt_uniform(1,Nx)
     !
-    if(MpiMaster)then
-       Emin = huge(1d0)
-       Emax = -huge(1d0)
-       !
-       call pdf_allocate(lat_pdf,[100,100])
-       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
-       lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
-       call pdf_push_sigma(lat_pdf,lat_sigma)
-    endif
+    ! if(MpiMaster)then
+    Emin = huge(1d0)
+    Emax = -huge(1d0)
+    !
+    call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
+    call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+    lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+    call pdf_push_sigma(lat_pdf,lat_sigma)
+    ! endif
     !
     if(MpiMaster)call start_timer()
     MCsweep: do iter=1,Nsweep
@@ -453,12 +449,10 @@ contains
                    M_sum   = M_sum + sqrt(dot_product(Mag/Nlat,Mag/Nlat))
                    Esq_sum = Esq_sum + Ene*Ene/Nlat/Nlat
                    Msq_Sum = Msq_Sum + dot_product(Mag/Nlat,Mag/Nlat)
-                   if(MpiMaster)then
-                      write(999,*)Ene/Nlat
-                      if(Ene/Nlat < Emin) Emin=Ene/Nlat
-                      if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                      call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
-                   endif
+                   write(999-MpiRank,*)Ene/Nlat
+                   if(Ene/Nlat < Emin) Emin=Ene/Nlat
+                   if(Ene/Nlat > Emax) Emax=Ene/Nlat
+                   call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
                 endif
                 !
 #ifdef _SITE
@@ -475,7 +469,7 @@ contains
        endif
     enddo MCsweep
     if(MpiMaster)call stop_timer
-    !
+    !    
     call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave
     call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave
     call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave
@@ -488,39 +482,59 @@ contains
     !
     if(MpiMaster)then
        write(unit,*)temp,aMag,Ene,Cv,Chi,Nave
+       write(*,"(A,I0)")     "Na=",Nave
+       write(*,"(A,I0)")     "Ns=",Nsweep
+       write(*,"(A,I0)")     "Nb=",Nbrk
        write(*,"(A,F21.12)") "T =",temp
        write(*,"(A,F21.12)") "M =",aMag
        write(*,"(A,F21.12)") "E =",Ene
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
-       write(*,"(A,I0)")     "Na=",Nave
-       !
+       !       
        call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//".dat")
        if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.true.)
-       call pdf_allocate(ene_pdf,500)
-       call pdf_set_range(ene_pdf,Emin-1d0,Emax+1d0)
-       call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
-       call pdf_push_sigma(ene_pdf,ene_sigma)
+    endif
 
-       rewind(999)
-       call start_timer()
-       do i=1,Nave
-          read(999,*)data
-          call pdf_accumulate(ene_pdf,data)
-          call eta(i,Nave)
-       enddo
-       call system("rm -fv fort.999")
-       call stop_timer()
+    Emin = Emin-10d0
+    Emax = Emax+10d0
+    call Bcast_MPI(MpiComm,Emin)
+    call Bcast_MPI(MpiComm,Emax)
+    !
+    call pdf_allocate(ene_pdf,Npdf1)
+    call pdf_set_range(ene_pdf,Emin,Emax)
+    call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
+    call pdf_push_sigma(ene_pdf,ene_sigma)
+    !
+    rewind(999-MpiRank)
+    if(MpiMaster)call start_timer()
+    do i=1,Nave
+       read(999-Mpirank,*)data
+       call pdf_accumulate(ene_pdf,data)
+    enddo
+    call system("rm -fv fort."//str(999-MpiRank))
+    if(MpiMaster)call stop_timer()
+    !
+    call pdf_normalize(ene_pdf)
+    call pdf_normalize(lat_pdf)
+    !
+    ene_pdf_tmp=0d0
+    call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
+    ene_pdf%pdf = ene_pdf_tmp
+    !
+    lat_pdf_tmp=0d0
+    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
+    lat_pdf%pdf = lat_pdf_tmp
+    !
+    if(MpiMaster)then
        call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
-       call pdf_deallocate(ene_pdf)
-       !
        call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
        call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
-       call pdf_deallocate(lat_pdf)
-       write(*,"(A)")""  
+       write(*,"(A)")""
     endif
+    call pdf_deallocate(ene_pdf)
+    call pdf_deallocate(lat_pdf)
     !
   end subroutine MC_vo2_3D
 
