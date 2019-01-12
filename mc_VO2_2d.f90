@@ -439,15 +439,13 @@ contains
                 M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
                 Esq_sum = Esq_sum + Ene*Ene
                 Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
-                if(MpiMaster)then
-                   write(999,*)Ene/Nlat
-                   if(Ene/Nlat < Emin) Emin=Ene/Nlat
-                   if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                   write(500,*)E_sum/Nlat
-                   !
-                   call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
-                   !
-                end if
+                write(999-MpiRank,*)Ene/Nlat
+                if(Ene/Nlat < Emin) Emin=Ene/Nlat
+                if(Ene/Nlat > Emax) Emax=Ene/Nlat
+                write(500,*)E_sum/Nlat
+                !
+                call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
+                !
              endif
              !
 #ifdef _SITE
@@ -455,7 +453,7 @@ contains
 #else
           enddo jloop
        enddo iloop
-#endif       
+#endif
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
@@ -504,7 +502,7 @@ contains
        read(999-Mpirank,*)data
        call pdf_accumulate(ene_pdf,data)
     enddo
-    !call system("rm -fv fort."//str(999-MpiRank))
+    call system("rm -fv fort."//str(999-MpiRank))
     if(MpiMaster)call stop_timer()
     !
     call pdf_normalize(ene_pdf)

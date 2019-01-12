@@ -458,7 +458,7 @@ contains
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
                    write(500,*)E_sum/Nlat
                    !
-                   !call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
+                   call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
                    !
                 endif
                 !
@@ -517,7 +517,7 @@ contains
        read(999-Mpirank,*)data
        call pdf_accumulate(ene_pdf,data)
     enddo
-    ! call system("rm -fv fort."//str(999-MpiRank))
+    call system("rm -fv fort."//str(999-MpiRank))
     if(MpiMaster)call stop_timer()
     !
     call pdf_normalize(ene_pdf)
@@ -527,16 +527,16 @@ contains
     call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
     ene_pdf%pdf = ene_pdf_tmp
     !
-    ! lat_pdf_tmp=0d0
-    ! call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
-    ! lat_pdf%pdf = lat_pdf_tmp
+    lat_pdf_tmp=0d0
+    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
+    lat_pdf%pdf = lat_pdf_tmp
     !
     if(MpiMaster)then
        call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
-       ! call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
-       ! call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
+       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+       call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
        write(*,"(A)")""
     endif
     call pdf_deallocate(ene_pdf)
