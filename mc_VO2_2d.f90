@@ -55,13 +55,10 @@ program vo2_2d
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
   call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
   call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
-#ifdef _SITE
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=2,comment="In units of 10**6")
-  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=5000)
-#else
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=20000,comment="In units of 10**4")
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=5,comment="In units of 10**3")
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
-#endif
+  call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
+  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
   call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
@@ -72,11 +69,8 @@ program vo2_2d
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
-#ifdef _SITE
-  Nsweep=Nsweep*10**6
-#else
-  Nsweep=Nsweep*10**4
-#endif
+  !
+  Nsweep=Nsweep*10**3
   !
   allocate(MpiSeed(MpiSize))
   call random_number(MpiSeed)
@@ -182,7 +176,7 @@ contains
     real(8),dimension(Mfit2)       :: array2
     real(8),dimension(Mfit1,Mfit2) :: potential
     integer                        :: i1,i2
-    real(8)                        :: ddx1,ddx2
+    real(8)                        :: ddx1,ddx2,x,y
     !
     write(*,"(A)")"Building up the interpolated VO2-Phonon potential"
     array1 = linspace(X1_min,X1_max,Mfit1,mesh=ddx1)
@@ -192,18 +186,14 @@ contains
     write(*,"(A,I0,2x,I0)")"Rflips:",Rflip1,Rflip2
     do i1=1,Mfit1
        do i2=1,Mfit2
-          potential(i1,i2) = lambda*vo2_elocal(array1(i1),array2(i2))
+          x = array1(i1)
+          y = array2(i2)
+          potential(i1,i2) = ceiling(Alat**2)*lambda*finter2d(vo2_ElocInter,x,y)
        enddo
     enddo
     write(*,"(A)")"Done"
     write(*,"(A)")""
   end subroutine build_VO2_potential
-
-  function vo2_elocal(x,y) result(func)
-    real(8) :: x,y
-    real(8) :: func
-    func = finter2d(vo2_ElocInter,x,y)
-  end function vo2_elocal
 
 
 
@@ -247,9 +237,11 @@ contains
     integer                       :: in
     real(8)                       :: E0,Wfield
     integer                       :: i1,i2
+    integer                       :: ii,jj
     real(8)                       :: x1,x2
     integer                       :: i1NN,i2NN
     real(8)                       :: x1NN,x2NN
+    real(8)                       :: Ui(2),Uj(2)
     integer                       :: NstNbor(4,2)
     !
     NstNbor = Lattice_Neighbors(i,j)
@@ -264,18 +256,23 @@ contains
     !
     x1 = arrayX1(i1)
     x2 = arrayX2(i2)
+    Ui = [x1,x2]
     !
     Wfield = 0d0
     do in=1,4
-       i1NN = Lattice(NstNbor(in,1),NstNbor(in,2),1)
-       i2NN = Lattice(NstNbor(in,1),NstNbor(in,2),2)
-       x1NN = arrayX1(i1NN)
-       x2NN = arrayX2(i2NN)
+       ii     = NstNbor(in,1)
+       jj     = NstNbor(in,2)
+       i1NN   = Lattice(ii,jj,1)
+       i2NN   = Lattice(ii,jj,2)
+       x1NN   = arrayX1(i1NN)
+       x2NN   = arrayX2(i2NN)
+       Uj     = [x1NN,x2NN]
        !
-       Wfield  = Wfield + Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
+       Wfield  = Wfield +  dot_product(Ui-Uj,Ui-Uj)
+       !Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
     enddo
     !
-    E0     = Wfield  + ceiling(Alat**2)*VO2_potential(i1,i2)
+    E0     = Jh*Wfield  + VO2_potential(i1,i2)
     !
   end function Lattice_Eloc
 
@@ -350,10 +347,13 @@ contains
     integer                    :: iter,myI,myJ
     integer                    :: i,j,Nlat
     !
-    real(8)                    :: data,Emin,Emax,ene_sigma
-    type(pdf_kernel)           :: ene_pdf
-    type(pdf_kernel_2d)        :: lat_pdf
-    real(8),dimension(2,2)     :: lat_sigma
+    real(8)                        :: data,Emin,Emax,ene_sigma
+    integer,parameter              :: Npdf1=500,Npdf2=100
+    real(8),dimension(Npdf1)       :: ene_pdf_tmp
+    real(8),dimension(Npdf2,Npdf2) :: lat_pdf_tmp
+    type(pdf_kernel)               :: ene_pdf
+    type(pdf_kernel_2d)            :: lat_pdf
+    real(8),dimension(2,2)         :: lat_sigma
     !
     !
     !
@@ -378,15 +378,15 @@ contains
     myI = mt_uniform(1,Nx)
     myJ = mt_uniform(1,Nx)
     !
-    if(MpiMaster)then
-       Emin = huge(1d0)
-       Emax = -huge(1d0)
-       !
-       call pdf_allocate(lat_pdf,[100,100])
-       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
-       lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
-       call pdf_push_sigma(lat_pdf,lat_sigma)
-    endif
+    ! if(MpiMaster)then
+    Emin =  huge(1d0)
+    Emax = -huge(1d0)
+    !
+    call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
+    call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+    lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+    call pdf_push_sigma(lat_pdf,lat_sigma)
+    ! endif
     !
     if(MpiMaster)call start_timer()
     MCsweep: do iter=1,Nsweep
@@ -395,8 +395,8 @@ contains
        i = mt_uniform(1,Nx)
        j = mt_uniform(1,Nx)
 #else
-       do i=1,Nx
-          do j=1,Nx
+       iloop:do i=1,Nx
+          jloop:do j=1,Nx
 #endif
              !
              i1 = Lattice(i,j,1)
@@ -411,7 +411,7 @@ contains
              in_bool = (i1_flip<Mfit1).AND.(1<i1_flip).AND.(i2_flip<Mfit2).AND.(1<i2_flip)
              if(.not.in_bool)then
                 Nbrk = Nbrk+1
-                cycle
+                cycle jloop
              endif
              !
              x1_flip = arrayX1(i1_flip)
@@ -423,7 +423,7 @@ contains
              !
              P = exp(-Ediff/Temp)
              !
-             if( min(1d0,P) > mersenne())then
+             if( min(1d0,P) > mersenne() )then
                 Ene  = Ene + Ediff
                 Mag  = Mag - [x1,x2] + [x1_flip,x2_flip]
                 !
@@ -435,14 +435,15 @@ contains
              !
              if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
                 Nave    = Nave + 1
-                E_sum   = E_sum + Ene/Nlat
-                M_sum   = M_sum + sqrt(dot_product(Mag/Nlat,Mag/Nlat))
-                Esq_sum = Esq_sum + Ene*Ene/Nlat/Nlat
-                Msq_Sum = Msq_Sum + dot_product(Mag/Nlat,Mag/Nlat)
+                E_sum   = E_sum + Ene
+                M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
+                Esq_sum = Esq_sum + Ene*Ene
+                Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
                 if(MpiMaster)then
                    write(999,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
+                   write(500,*)E_sum/Nlat
                    !
                    call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
                    !
@@ -452,8 +453,8 @@ contains
 #ifdef _SITE
              !
 #else
-          enddo
-       enddo
+          enddo jloop
+       enddo iloop
 #endif       
        !
        if(MpiMaster)then
@@ -462,52 +463,71 @@ contains
        endif
     enddo MCsweep
     if(MpiMaster)call stop_timer
+    !    
+    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave/Nlat/Nlat
+    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave/Nlat/Nlat
     !
-    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave
-    !
-    aMag = M_mean
-    Ene = E_mean
     Chi = (Msq_Mean - M_mean**2)/Temp
     Cv  = (Esq_mean - E_mean**2)/Temp/Temp
     !
     if(MpiMaster)then
-       write(unit,*)temp,aMag,Ene,Cv,Chi,Nave
+       write(unit,*)temp,M_mean,E_mean,Cv,Chi,Nave,Nsweep,Nx
+       write(*,"(A,I0)")     "Nx=",Nx
+       write(*,"(A,I0)")     "Na=",Nave
+       write(*,"(A,I0)")     "Ns=",Nsweep
+       write(*,"(A,I0)")     "Nb=",Nbrk
        write(*,"(A,F21.12)") "T =",temp
-       write(*,"(A,F21.12)") "M =",aMag
-       write(*,"(A,F21.12)") "E =",Ene
+       write(*,"(A,F21.12)") "M =",M_mean
+       write(*,"(A,F21.12)") "E =",E_mean
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
-       write(*,"(A,I0)")     "Na=",Nave
        !
        call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp))
        if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.true.)
-       call pdf_allocate(ene_pdf,500)
-       call pdf_set_range(ene_pdf,Emin-1d0,Emax+1d0)
-       call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
-       call pdf_push_sigma(ene_pdf,ene_sigma)
+    endif
 
-       rewind(999)
-       call start_timer()
-       do i=1,Nave
-          read(999,*)data
-          call pdf_accumulate(ene_pdf,data)
-          call eta(i,Nave)
-       enddo
-       call system("rm -fv fort.999")
-       call stop_timer()
+    Emin = Emin-10d0
+    Emax = Emax+10d0
+    call Bcast_MPI(MpiComm,Emin)
+    call Bcast_MPI(MpiComm,Emax)
+    !
+    call pdf_allocate(ene_pdf,Npdf1)
+    call pdf_set_range(ene_pdf,Emin,Emax)
+    call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
+    call pdf_push_sigma(ene_pdf,ene_sigma)
+    !
+    rewind(999-MpiRank)
+    if(MpiMaster)call start_timer()
+    do i=1,Nave
+       read(999-Mpirank,*)data
+       call pdf_accumulate(ene_pdf,data)
+    enddo
+    !call system("rm -fv fort."//str(999-MpiRank))
+    if(MpiMaster)call stop_timer()
+    !
+    call pdf_normalize(ene_pdf)
+    call pdf_normalize(lat_pdf)
+    !
+    ene_pdf_tmp=0d0
+    call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
+    ene_pdf%pdf = ene_pdf_tmp
+    !
+    lat_pdf_tmp=0d0
+    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
+    lat_pdf%pdf = lat_pdf_tmp
+    !
+    if(MpiMaster)then
        call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
-       call pdf_deallocate(ene_pdf)
-       !
        call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
        call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
-       call pdf_deallocate(lat_pdf)
-       write(*,"(A)")""  
+       write(*,"(A)")""
     endif
+    call pdf_deallocate(ene_pdf)
+    call pdf_deallocate(lat_pdf)
     !
   end subroutine MC_Vo2_2D
 
@@ -629,6 +649,7 @@ contains
     elseif(x1>0d0.AND.x2<0d0)then
        theta = 2*pi - thetap    !Q4
     end if
+    ! thetap = atan2(x2,x1)
   end function get_theta
 
 

@@ -55,7 +55,7 @@ program vo2_3d
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
   call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
   call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
-  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=2,comment="In units of 10**3")
+  call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=5,comment="In units of 10**3")
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
@@ -118,7 +118,7 @@ program vo2_3d
   X2_min = minval(x2)
   X2_max = maxval(x2)
   !
-  Alat = max(X1_max-X1_min,X2_max-X2_min)
+  Alat = max(X1_max-X1_min,X2_max-X2_min)/2d0
   !
   call init_finter2d(vo2_ElocInter,X1,X2,EnergyLocal,3)
   !
@@ -130,12 +130,11 @@ program vo2_3d
   !
   !Init the MT rng
   call mersenne_init(seed)
-
   !
   !Read Temps
   inquire(file=str(TempFile),exist=IObool)
   if(IObool)then
-     write(*,"(A)")'Reading Temperatures from file'//str(TempFile)
+     if(MpiMaster)write(*,"(A)")'Reading Temperatures from file'//str(TempFile)
      TempLen = file_length(str(TempFile))
      open(free_unit(unit),file=str(TempFile))
      allocate(TempList(TempLen))
@@ -177,7 +176,7 @@ contains
     real(8),dimension(Mfit2)       :: array2
     real(8),dimension(Mfit1,Mfit2) :: potential
     integer                        :: i1,i2
-    real(8)                        :: ddx1,ddx2
+    real(8)                        :: ddx1,ddx2,x,y
     !
     write(*,"(A)")"Building up the interpolated VO2-Phonon potential"
     array1 = linspace(X1_min,X1_max,Mfit1,mesh=ddx1)
@@ -187,18 +186,14 @@ contains
     write(*,"(A,I0,2x,I0)")"Rflips:",Rflip1,Rflip2
     do i1=1,Mfit1
        do i2=1,Mfit2
-          potential(i1,i2) = lambda*vo2_elocal(array1(i1),array2(i2))
+          x = array1(i1)
+          y = array2(i2)
+          potential(i1,i2) = ceiling(Alat**2)*lambda*finter2d(vo2_ElocInter,x,y)
        enddo
     enddo
     write(*,"(A)")"Done"
     write(*,"(A)")""
   end subroutine build_VO2_potential
-
-  function vo2_elocal(x,y) result(func)
-    real(8) :: x,y
-    real(8) :: func
-    func = finter2d(vo2_ElocInter,x,y)
-  end function vo2_elocal
 
 
 
@@ -248,9 +243,13 @@ contains
     integer                       :: in
     real(8)                       :: E0,Wfield
     integer                       :: i1,i2
+    integer                       :: ii,jj,kk
     real(8)                       :: x1,x2
     integer                       :: i1NN,i2NN
     real(8)                       :: x1NN,x2NN
+    real(8)                       :: rho,rhoNN
+    real(8)                       :: Ui(2),Uj(2)
+    real(8)                       :: theta,thetaNN
     integer                       :: NstNbor(6,3)
     !
     NstNbor = Lattice_Neighbors(i,j,k)
@@ -263,20 +262,25 @@ contains
        i2 = Lattice(i,j,k,2)
     endif
     !
-    x1 = arrayX1(i1)
-    x2 = arrayX2(i2)
+    x1   = arrayX1(i1)
+    x2   = arrayX2(i2)
+    Ui   = [x1,x2]
     !
     Wfield = 0d0
     do in=1,6
-       i1NN = Lattice(NstNbor(in,1),NstNbor(in,2),NstNbor(in,3),1)
-       i2NN = Lattice(NstNbor(in,1),NstNbor(in,2),NstNbor(in,3),2)
-       x1NN = arrayX1(i1NN)
-       x2NN = arrayX2(i2NN)
+       ii     = NstNbor(in,1)
+       jj     = NstNbor(in,2)
+       kk     = NstNbor(in,3)
+       i1NN   = Lattice(ii,jj,kk,1)
+       i2NN   = Lattice(ii,jj,kk,2)
+       x1NN   = arrayX1(i1NN)
+       x2NN   = arrayX2(i2NN)
+       Uj     = [x1NN,x2NN]
        !
-       Wfield  = Wfield + Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
+       Wfield  = Wfield + dot_product(Ui-Uj,Ui-Uj)
     enddo
     !
-    E0     = Wfield  + ceiling(Alat**2)*VO2_potential(i1,i2)
+    E0     = Jh*Wfield + VO2_potential(i1,i2)
     !
   end function Lattice_Eloc
 
@@ -346,7 +350,6 @@ contains
     real(8)                        :: E_mean
     real(8)                        :: Esq_mean
     !
-    real(8)                        :: aMag
     real(8)                        :: M_sum
     real(8)                        :: Msq_sum
     real(8)                        :: M_mean
@@ -363,7 +366,8 @@ contains
     type(pdf_kernel_2d)            :: lat_pdf
     real(8),dimension(2,2)         :: lat_sigma
     !
-
+    !
+    !
     Nlat=Nx*Nx*Nx
     !
     call Init_Lattice(Lattice)
@@ -387,7 +391,7 @@ contains
     myK = mt_uniform(1,Nx)
     !
     ! if(MpiMaster)then
-    Emin = huge(1d0)
+    Emin =  huge(1d0)
     Emax = -huge(1d0)
     !
     call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
@@ -404,9 +408,9 @@ contains
        j = mt_uniform(1,Nx)
        k = mt_uniform(1,Nx)
 #else
-       do i=1,Nx
-          do j=1,Nx
-             do k=1,Nx
+       iloop:do i=1,Nx
+          jloop:do j=1,Nx
+             kloop:do k=1,Nx
 #endif
                 !
                 i1 = Lattice(i,j,k,1)
@@ -421,7 +425,7 @@ contains
                 in_bool = (i1_flip<Mfit1).AND.(1<i1_flip).AND.(i2_flip<Mfit2).AND.(1<i2_flip)
                 if(.not.in_bool)then
                    Nbrk = Nbrk+1
-                   cycle
+                   cycle kloop
                 endif
                 !
                 x1_flip = arrayX1(i1_flip)
@@ -433,7 +437,7 @@ contains
                 !
                 P = exp(-Ediff/Temp)
                 !
-                if( min(1d0,P) > mersenne())then
+                if( min(1d0,P) > mersenne() )then
                    Ene  = Ene + Ediff
                    Mag  = Mag - [x1,x2] + [x1_flip,x2_flip]
                    !
@@ -445,22 +449,25 @@ contains
                 !
                 if(iter>Nwarm.AND.mod(iter,Nmeas)==0)then
                    Nave    = Nave + 1
-                   E_sum   = E_sum + Ene/Nlat
-                   M_sum   = M_sum + sqrt(dot_product(Mag/Nlat,Mag/Nlat))
-                   Esq_sum = Esq_sum + Ene*Ene/Nlat/Nlat
-                   Msq_Sum = Msq_Sum + dot_product(Mag/Nlat,Mag/Nlat)
+                   E_sum   = E_sum + Ene
+                   M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
+                   Esq_sum = Esq_sum + Ene*Ene
+                   Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
                    write(999-MpiRank,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                   call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
+                   write(500,*)E_sum/Nlat
+                   !
+                   !call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
+                   !
                 endif
                 !
 #ifdef _SITE
                 !
 #else
-             enddo
-          enddo
-       enddo
+             enddo kloop
+          enddo jloop
+       enddo iloop
 #endif
        !
        if(MpiMaster)then
@@ -470,24 +477,23 @@ contains
     enddo MCsweep
     if(MpiMaster)call stop_timer
     !    
-    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave
-    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave
+    call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave/Nlat/Nlat
+    call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave/Nlat/Nlat
     !
-    aMag = M_mean
-    Ene = E_mean
     Chi = (Msq_Mean - M_mean**2)/Temp
     Cv  = (Esq_mean - E_mean**2)/Temp/Temp
     !
     if(MpiMaster)then
-       write(unit,*)temp,aMag,Ene,Cv,Chi,Nave
+       write(unit,*)temp,M_mean,E_mean,Cv,Chi,Nave,Nsweep,Nx
+       write(*,"(A,I0)")     "Nx=",Nx
        write(*,"(A,I0)")     "Na=",Nave
        write(*,"(A,I0)")     "Ns=",Nsweep
        write(*,"(A,I0)")     "Nb=",Nbrk
        write(*,"(A,F21.12)") "T =",temp
-       write(*,"(A,F21.12)") "M =",aMag
-       write(*,"(A,F21.12)") "E =",Ene
+       write(*,"(A,F21.12)") "M =",M_mean
+       write(*,"(A,F21.12)") "E =",E_mean
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
        !       
@@ -511,7 +517,7 @@ contains
        read(999-Mpirank,*)data
        call pdf_accumulate(ene_pdf,data)
     enddo
-    call system("rm -fv fort."//str(999-MpiRank))
+    ! call system("rm -fv fort."//str(999-MpiRank))
     if(MpiMaster)call stop_timer()
     !
     call pdf_normalize(ene_pdf)
@@ -521,16 +527,16 @@ contains
     call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
     ene_pdf%pdf = ene_pdf_tmp
     !
-    lat_pdf_tmp=0d0
-    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
-    lat_pdf%pdf = lat_pdf_tmp
+    ! lat_pdf_tmp=0d0
+    ! call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
+    ! lat_pdf%pdf = lat_pdf_tmp
     !
     if(MpiMaster)then
        call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
        call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
-       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
-       call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
+       ! call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+       ! call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
        write(*,"(A)")""
     endif
     call pdf_deallocate(ene_pdf)
