@@ -378,7 +378,6 @@ contains
     myI = mt_uniform(1,Nx)
     myJ = mt_uniform(1,Nx)
     !
-    ! if(MpiMaster)then
     Emin =  huge(1d0)
     Emax = -huge(1d0)
     !
@@ -386,7 +385,6 @@ contains
     call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
     lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
     call pdf_push_sigma(lat_pdf,lat_sigma)
-    ! endif
     !
     if(MpiMaster)call start_timer()
     MCsweep: do iter=1,Nsweep
@@ -442,7 +440,7 @@ contains
                 write(999-MpiRank,*)Ene/Nlat
                 if(Ene/Nlat < Emin) Emin=Ene/Nlat
                 if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                write(500,*)E_sum/Nlat
+                ! write(500,*)E_sum/Nlat
                 !
                 call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
                 !
