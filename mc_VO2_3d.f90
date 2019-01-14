@@ -201,6 +201,8 @@ contains
     integer,dimension(Nx,Nx,Nx,2) :: lattice
     integer                       :: i,j,k
     !
+    integer,dimension(6,3) :: neigh
+    !
     do k=1,Nx
        do j=1,Nx
           do i=1,Nx
@@ -222,7 +224,7 @@ contains
     !PBC:
     i_dx = i+1 ;if(i_dx>Nx)i_dx=1
     j_up = j+1 ;if(j_up>Nx)j_up=1
-    k_tp = k+i ;if(k_tp>Nx)k_tp=1
+    k_tp = k+1 ;if(k_tp>Nx)k_tp=1
     i_sx = i-1 ;if(i_sx<1)i_sx=Nx
     j_dw = j-1 ;if(j_dw<1)j_dw=Nx
     k_bt = k-1 ;if(k_bt<1)k_bt=Nx
@@ -456,7 +458,6 @@ contains
                    write(999-MpiRank,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                   write(500,*)E_sum/Nlat
                    !
                    call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
                    !
@@ -670,7 +671,7 @@ contains
   end function get_theta
 
 
-end program vo2_3d
+end program
 
 
 
