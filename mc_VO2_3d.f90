@@ -74,10 +74,10 @@ program vo2_3d
   !
   allocate(MpiSeed(MpiSize))
   call random_number(MpiSeed)
-  do irank=1,MpiSize
+  do irank=0,MpiSize-1
      call Barrier_MPI(MpiComm)
-     if(irank==MpiRank+1)then
-        seed = int(Seed*MpiSeed(irank))
+     if(irank==MpiRank)then
+        seed = int(Seed*MpiSeed(irank+1))
         open(100,file="Seed_Rank"//str(irank,4)//".dat")
         write(100,*)seed
         write(*,*)"Irank",irank," seed=",seed
@@ -199,19 +199,54 @@ contains
 
   subroutine Init_Lattice(lattice)
     integer,dimension(Nx,Nx,Nx,2) :: lattice
-    integer                       :: i,j,k
+    integer                       :: i,j,k,unit
+    integer                       :: aI,bI
+    logical                       :: bool
     !
-    integer,dimension(6,3) :: neigh
+    inquire(file="lattice_rank"//str(MpiRank,4)//".restart",exist=bool)
+    if(bool)then
+       write(*,*)"Reading Lattice from lattice_rank"//str(MpiRank,4)//".restart"
+       open(free_unit(unit),file="lattice_rank"//str(MpiRank,4)//".restart")
+       do i=1,Nx
+          do j=1,Nx
+             do k=1,Nx
+                read(unit,*)aI,bI
+                lattice(i,j,k,1) = aI
+                lattice(i,j,k,2) = bI
+             enddo
+          enddo
+       enddo
+       close(unit)
+    else
+       do i=1,Nx
+          do j=1,Nx
+             do k=1,Nx
+                lattice(i,j,k,1) = mt_uniform(1,Mfit1)
+                lattice(i,j,k,2) = mt_uniform(1,Mfit2)
+             enddo
+          enddo
+       enddo
+    endif
+  end subroutine Init_Lattice
+
+
+
+  subroutine Save_Lattice(lattice)
+    integer,dimension(Nx,Nx,Nx,2) :: lattice
+    integer                       :: i,j,k,unit
     !
-    do k=1,Nx
+
+    open(free_unit(unit),file="lattice_rank"//str(MpiRank,4)//".restart")
+    do i=1,Nx
        do j=1,Nx
-          do i=1,Nx
-             lattice(i,j,k,1) = mt_uniform(1,Mfit1)
-             lattice(i,j,k,2) = mt_uniform(1,Mfit2)
+          do k=1,Nx
+             write(unit,*)lattice(i,j,k,1),lattice(i,j,k,2)
           enddo
        enddo
     enddo
-  end subroutine Init_Lattice
+    close(unit)
+  end subroutine Save_Lattice
+
 
 
   function Lattice_Neighbors(i,j,k) result(neigh)
@@ -477,7 +512,9 @@ contains
        endif
     enddo MCsweep
     if(MpiMaster)call stop_timer
-    !    
+    !
+    call Save_Lattice(Lattice)
+    !
     call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave/Nlat/Nlat
@@ -671,7 +708,7 @@ contains
   end function get_theta
 
 
-end program
+end program vo2_3d
 
 
 
