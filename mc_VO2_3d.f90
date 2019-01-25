@@ -408,6 +408,7 @@ contains
     Nlat=Nx*Nx*Nx
     !
     call Init_Lattice(Lattice)
+    call print_Lattice(Lattice,"mc_Init_Lattice_Temp"//str(Temp)//".dat")
     !
     Ene = Lattice_Energy(Lattice)
     Mag = Lattice_Magnetization(Lattice)
@@ -508,8 +509,9 @@ contains
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
-          if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.false.)
+          ! if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.false.)
        endif
+       if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//".dat",.false.)
     enddo MCsweep
     if(MpiMaster)call stop_timer
     !
@@ -536,8 +538,9 @@ contains
        write(*,"(A,F21.12)") "X =",Chi
        !       
        call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//".dat")
-       if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.true.)
+       ! if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//".dat",.true.)
     endif
+    if(wPoint)call Print_Point(Lattice(myI,myJ,myK,:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//".dat",.true.)
 
     Emin = Emin-10d0
     Emax = Emax+10d0
@@ -593,7 +596,7 @@ contains
     integer                       :: i,j,k
     real(8)                       :: rho,theta,x1,x2
     !
-    open(200,file=str(pfile)//".dat")
+    open(200,file=str(pfile))
     k = mt_uniform(1,Nx)
     do i=1,Nx
        do j=1,Nx
@@ -620,7 +623,7 @@ contains
     !
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"AllPoints.pdf'"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' u (xf($5,$4)):(yf($5,$4)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"' u (xf($5,$4)):(yf($5,$4)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
     !
     write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
     write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
@@ -631,7 +634,7 @@ contains
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
     write(200,"(A)")"k="//str(k)
-    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:4 with image, '"//str(pfile)//".dat' u 1:2:(xf($5*scale,$4)):(yf($5*scale,$4)) with vectors as 1"
+    write(200,"(A)")"plot '"//str(pfile)//"' u 1:2:4 with image, '"//str(pfile)//"' u 1:2:(xf($5*scale,$4)):(yf($5*scale,$4)) with vectors as 1"
     !
     close(200)
     !
@@ -649,7 +652,7 @@ contains
        iter = iter+1
        rho  = sqrt(arrayX1(point(1))**2 + arrayX2(point(2))**2)
        theta= get_theta(arrayX1(point(1)),arrayX2(point(2)))
-       open(200,file=str(pfile)//".dat",access='append')
+       open(200,file=str(pfile),access='append')
        write(200,*)theta,rho,vo2_potential(point(1),point(2))
        close(200)
        return
@@ -670,7 +673,7 @@ contains
     write(200,"(A)")"set pm3d map"
     write(200,"(A)")"do for [i=1:"//str(iter)//":10] {"
     write(200,"(A)")"set title 'i='.i"   
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white','"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//"' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white','"//str(pfile)//"' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
     write(200,"(A)")"}"
     write(200,"(A)")""
     write(200,"(A)")""
@@ -680,7 +683,7 @@ contains
     write(200,"(A)")"#set zrange [-0.2:0]"
     write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
     write(200,"(A)")"#set title 'i='.i"   
-    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white', 'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'"//str(pfile)//"' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white', '"//str(pfile)//"' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
     write(200,"(A)")"#}"
     write(200,"(A)")""
     write(200,"(A)")""
