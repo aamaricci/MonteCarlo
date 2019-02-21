@@ -14,11 +14,14 @@ program vo2_2d
   integer                            :: Mfit2
   integer                            :: Rflip1
   integer                            :: Rflip2
+  integer                            :: Npoints
   real(8)                            :: dx1
   real(8)                            :: dx2
-  real(8)                            :: Temp
+  real(8)                            :: Temp,p_global
   character(len=100)                 :: TempFile
   logical                            :: wPoint
+  logical                            :: wPDF1d
+  logical                            :: wPDF2d
   !
   real(8),dimension(:),allocatable   :: TempList
   integer                            :: i,j,unit,it,TempLen
@@ -55,29 +58,33 @@ program vo2_2d
   call parse_input_variable(Jh,"JH","inputVO2.conf",default=1d0)
   call parse_input_variable(Lambda,"Lambda","inputVO2.conf",default=1d0)
   call parse_input_variable(Nx,"Nx","inputVO2.conf",default=20)
+  call parse_input_variable(p_global,"P_GLOBAL","inputVO2.conf",default=0.5d0)
   call parse_input_variable(Nsweep,"Nsweep","inputVO2.conf",default=5,comment="In units of 10**3")
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
-  call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
-  call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
+  call parse_input_variable(Npoints,"Npoints","inputVO2.conf",default=10)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
   call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
-  call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=1000)
-  call parse_input_variable(Mfit2,"MFit2","inputVO2.conf",default=1000)
+  call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=90)
+  call parse_input_variable(Mfit2,"MFit2","inputVO2.conf",default=120)
   call parse_input_variable(dx1,"dx1","inputVO2.conf",default=0.1d0)
   call parse_input_variable(dx2,"dx2","inputVO2.conf",default=0.1d0)
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
+  call parse_input_variable(wPDF1d,"wPDF1d","inputVO2.conf",default=.true.)
+  call parse_input_variable(wPDF2d,"wPDF2d","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
+  !
+  if(Mfit1<=size(X1).OR.Mfit2<=size(X2))stop "Error: Mfit1 <= size(X1)=45 OR Mfit2 <= size(X2)=60 "
   !
   Nsweep=Nsweep*10**3
   !
   allocate(MpiSeed(MpiSize))
   call random_number(MpiSeed)
-  do irank=1,MpiSize
+  do irank=0,MpiSize-1
      call Barrier_MPI(MpiComm)
-     if(irank==MpiRank+1)then
-        seed = int(Seed*MpiSeed(irank))
+     if(irank==MpiRank)then
+        seed = int(Seed*MpiSeed(irank+1))
         open(100,file="Seed_Rank"//str(irank,4)//".dat")
         write(100,*)seed
         write(*,*)"Irank",irank," seed=",seed
@@ -104,8 +111,7 @@ program vo2_2d
   !mirror w/ to Origin==(0,0) axis: x1-->-X1 && x2-->-X2
   forall(i=1:22,j=1:30)EnergyLocal(-i,-j) = EnergyLocal(i,j-1)
   !
-  Emin = minval(EnergyLocal)
-  Emax = maxval(EnergyLocal)
+  Emin = minval(EnergyLocal) ; Emax = maxval(EnergyLocal)
   EnergyLocal = EnergyLocal - Emax
   EnergyLocal = EnergyLocal/(Emax-Emin)
   !
@@ -199,16 +205,46 @@ contains
 
   subroutine Init_Lattice(lattice)
     integer,dimension(Nx,Nx,2)    :: lattice
-    integer                       :: i,j
+    integer                       :: i,j,unit
+    integer                       :: aI,bI
+    logical                       :: bool
     !
-    do j=1,Nx
+    if(bool)then
+       write(*,*)"Reading Lattice from lattice_rank"//str(MpiRank,4)//".restart"
+       open(free_unit(unit),file="lattice_rank"//str(MpiRank,4)//".restart")
        do i=1,Nx
-          lattice(i,j,1) = mt_uniform(1,Mfit1)
-          lattice(i,j,2) = mt_uniform(1,Mfit2)
-          !
+          do j=1,Nx
+             read(unit,*)aI,bI
+             lattice(i,j,1) = aI
+             lattice(i,j,2) = bI
+          enddo
+       enddo
+       close(unit)
+    else
+       do j=1,Nx
+          do i=1,Nx
+             lattice(i,j,1) = mt_uniform(1,Mfit1)
+             lattice(i,j,2) = mt_uniform(1,Mfit2)
+             !
+          enddo
+       enddo
+    endif
+  end subroutine Init_Lattice
+
+
+
+  subroutine Save_Lattice(lattice)
+    integer,dimension(Nx,Nx,2) :: lattice
+    integer                       :: i,j,unit
+    !
+    open(free_unit(unit),file="lattice_rank"//str(MpiRank,4)//".restart")
+    do i=1,Nx
+       do j=1,Nx
+          write(unit,*)lattice(i,j,1),lattice(i,j,2)
        enddo
     enddo
-  end subroutine Init_Lattice
+    close(unit)
+  end subroutine Save_Lattice
 
 
   function Lattice_Neighbors(i,j) result(neigh)
@@ -268,11 +304,10 @@ contains
        x2NN   = arrayX2(i2NN)
        Uj     = [x1NN,x2NN]
        !
-       Wfield  = Wfield +  dot_product(Ui-Uj,Ui-Uj)
-       !Jh*dot_product([x1,x2]-[x1NN,x2NN],[x1,x2]-[x1NN,x2NN])
+       Wfield  = Wfield + dot_product(Ui-Uj,Ui-Uj)
     enddo
     !
-    E0     = Jh*Wfield  + VO2_potential(i1,i2)
+    E0     = Jh*Wfield + VO2_potential(i1,i2)
     !
   end function Lattice_Eloc
 
@@ -323,7 +358,7 @@ contains
     real(8)                    :: E0
     real(8)                    :: Eflip
     real(8)                    :: Ediff
-    real(8)                    :: P
+    real(8)                    :: P,Ran
     logical                    :: in_bool
     !    
     integer                    :: Nacc
@@ -338,22 +373,22 @@ contains
     real(8)                    :: E_mean
     real(8)                    :: Esq_mean
     !
-    real(8)                    :: aMag
     real(8)                    :: M_sum
     real(8)                    :: Msq_sum
     real(8)                    :: M_mean
     real(8)                    :: Msq_mean
     !
-    integer                    :: iter,myI,myJ
-    integer                    :: i,j,Nlat
+    integer                    :: iter
+    integer,dimension(Npoints) :: myI,myJ
+    integer                    :: i,ii,j,Nlat
     !
     real(8)                        :: data,Emin,Emax,ene_sigma
     integer,parameter              :: Npdf1=500,Npdf2=100
     real(8),dimension(Npdf1)       :: ene_pdf_tmp
-    real(8),dimension(Npdf2,Npdf2) :: lat_pdf_tmp
+    real(8),dimension(Npdf2,Npdf2) :: lat_pdf_tmp,mag_pdf_tmp
     type(pdf_kernel)               :: ene_pdf
-    type(pdf_kernel_2d)            :: lat_pdf
-    real(8),dimension(2,2)         :: lat_sigma
+    type(pdf_kernel_2d)            :: lat_pdf,mag_pdf
+    real(8),dimension(2,2)         :: lat_sigma,mag_sigma
     !
     !
     !
@@ -375,16 +410,20 @@ contains
     M_mean   = 0d0
     Esq_mean = 0d0
     Msq_mean = 0d0
-    myI = mt_uniform(1,Nx)
-    myJ = mt_uniform(1,Nx)
+    do i=1,Npoints
+       myI(i) = mt_uniform(1,Nx)
+       myJ(i) = mt_uniform(1,Nx)
+    enddo
     !
     Emin =  huge(1d0)
     Emax = -huge(1d0)
     !
-    call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
-    call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
-    lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
-    call pdf_push_sigma(lat_pdf,lat_sigma)
+    ! if(wPDF2d)then
+    !    call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
+    !    call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+    !    lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+    !    call pdf_push_sigma(lat_pdf,lat_sigma)
+    ! endif
     !
     if(MpiMaster)call start_timer()
     MCsweep: do iter=1,Nsweep
@@ -406,14 +445,28 @@ contains
              i1_flip = i1-Rflip1 + floor(rnd(1)*(2*Rflip1+1))
              i2_flip = i2-Rflip2 + floor(rnd(2)*(2*Rflip2+1))
              !
+             if(mersenne()>p_global)then
+                ran = mersenne()
+                if(ran<=1d0/3d0)then
+                   i1_flip = Mfit1-i1_flip+1
+                elseif(ran>2d0/3d0)then
+                   i2_flip = Mfit2-i2_flip+1
+                else
+                   i1_flip = Mfit1-i1_flip+1
+                   i2_flip = Mfit2-i2_flip+1
+                endif
+             endif
+             !
              in_bool = (i1_flip<Mfit1).AND.(1<i1_flip).AND.(i2_flip<Mfit2).AND.(1<i2_flip)
              if(.not.in_bool)then
                 Nbrk = Nbrk+1
                 cycle jloop
              endif
              !
+             !
              x1_flip = arrayX1(i1_flip)
              x2_flip = arrayX2(i2_flip)
+             !
              !
              E0      = Lattice_Eloc(Lattice,i,j)
              Eflip   = Lattice_Eloc(Lattice,i,j,[i1_flip,i2_flip])
@@ -437,12 +490,11 @@ contains
                 M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
                 Esq_sum = Esq_sum + Ene*Ene
                 Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
-                write(999-MpiRank,*)Ene/Nlat
+                write(999-MpiRank,*)Ene/Nlat,Mag(1)/Nlat,Mag(2)/Nlat
                 if(Ene/Nlat < Emin) Emin=Ene/Nlat
                 if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                ! write(500,*)E_sum/Nlat
                 !
-                call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
+                !if(wPDF2d)call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,1)),arrayX2(lattice(i,j,2))])
                 !
              endif
              !
@@ -455,11 +507,20 @@ contains
        !
        if(MpiMaster)then
           call eta(iter,Nsweep)
-          if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.false.)
+          if(wPoint)then
+             if(mod(iter,Nsweep/10)==0)call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//"_iter"//str(iter,12)//".dat")
+             do ii=1,Npoints
+                call Print_Point(Lattice(myI(ii),myJ(ii),:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat",.false.)
+                call Print_Angle(Lattice(myI(ii),myJ(ii),:),"mc_AngleDynamics_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat")
+             enddo
+          endif
        endif
     enddo MCsweep
     if(MpiMaster)call stop_timer
     !    
+    !
+    call Save_Lattice(Lattice)
+    !
     call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave/Nlat/Nlat
@@ -480,50 +541,83 @@ contains
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
        !
-       call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp))
-       if(wPoint)call Print_Point(Lattice(myI,myJ,:),"mc_PointGif_Temp"//str(Temp),.true.)
+       call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//".dat")
+       if(wPoint)then
+          do i=1,Npoints
+             call Print_Point(Lattice(myI(i),myJ(i),:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(i,2)//".dat",.true.)
+          enddo
+       endif
     endif
 
-    Emin = Emin-10d0
-    Emax = Emax+10d0
-    call Bcast_MPI(MpiComm,Emin)
-    call Bcast_MPI(MpiComm,Emax)
-    !
-    call pdf_allocate(ene_pdf,Npdf1)
-    call pdf_set_range(ene_pdf,Emin,Emax)
-    call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
-    call pdf_push_sigma(ene_pdf,ene_sigma)
-    !
-    rewind(999-MpiRank)
-    if(MpiMaster)call start_timer()
-    do i=1,Nave
-       read(999-Mpirank,*)data
-       call pdf_accumulate(ene_pdf,data)
-    enddo
-    call system("rm -fv fort."//str(999-MpiRank))
-    if(MpiMaster)call stop_timer()
-    !
-    call pdf_normalize(ene_pdf)
-    call pdf_normalize(lat_pdf)
-    !
-    ene_pdf_tmp=0d0
-    call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
-    ene_pdf%pdf = ene_pdf_tmp
-    !
-    lat_pdf_tmp=0d0
-    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
-    lat_pdf%pdf = lat_pdf_tmp
-    !
-    if(MpiMaster)then
-       call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
-       call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
-       call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
-       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
-       call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
-       write(*,"(A)")""
+    if(wPDF1d)then
+       Emin = Emin-10d0
+       Emax = Emax+10d0
+       call Bcast_MPI(MpiComm,Emin)
+       call Bcast_MPI(MpiComm,Emax)
+       !
+       call pdf_allocate(ene_pdf,Npdf1)
+       call pdf_set_range(ene_pdf,Emin,Emax)
+       call pdf_sigma(ene_pdf,sqrt(Esq_mean-E_mean**2),Nave,ene_sigma)
+       call pdf_push_sigma(ene_pdf,ene_sigma)
+       !
+       call pdf_allocate(mag_pdf,[Npdf2,Npdf2])
+       call pdf_set_range(mag_pdf,[-3d0,-3d0],[3d0,3d0])
+       !mag_sigma = reshape([sqrt(Msq_mean-M_mean**2),0d0,0d0,sqrt(Msq_mean-M_mean**2)],[2,2])
+       mag_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
+       call pdf_push_sigma(mag_pdf,mag_sigma)
+       !
+       rewind(999-MpiRank)
+       if(MpiMaster)call start_timer()
+       do i=1,Nave
+          read(999-Mpirank,*)data,mag(1),mag(2)
+          call pdf_accumulate(ene_pdf,data)
+          call pdf_accumulate(mag_pdf,mag)
+          call eta(i,Nave)
+       enddo
+       call system("rm -fv fort."//str(999-MpiRank))
+       if(MpiMaster)call stop_timer()
+       !
+       call pdf_normalize(ene_pdf)       
+       call pdf_normalize(mag_pdf)
+
+       ene_pdf_tmp=0d0
+       call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
+       ene_pdf%pdf = ene_pdf_tmp
+       !
+       mag_pdf_tmp=0d0
+       call AllReduce_MPI(MpiComm,mag_pdf%pdf,mag_pdf_tmp);mag_pdf_tmp=mag_pdf_tmp/MpiSize
+       mag_pdf%pdf = mag_pdf_tmp
+       !
+       if(MpiMaster)then
+          call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
+          call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
+          !
+          call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
+          !
+          call pdf_print(mag_pdf,"mc_PDF_M_Temp"//str(Temp)//".dat")
+          call pdf_save(mag_pdf,"mc_PDF_M_Temp"//str(Temp)//".save")
+          write(*,"(A)")""
+       endif
+       !
+       call pdf_deallocate(ene_pdf)
+       call pdf_deallocate(mag_pdf)
     endif
-    call pdf_deallocate(ene_pdf)
-    call pdf_deallocate(lat_pdf)
+    !
+    !
+    ! if(wPDF2d)then
+    !    call pdf_normalize(lat_pdf)
+    !    lat_pdf_tmp=0d0
+    !    call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
+    !    lat_pdf%pdf = lat_pdf_tmp
+    !    !
+    !    if(MpiMaster)then
+    !       call pdf_print(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".dat")
+    !       call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
+    !       write(*,"(A)")""
+    !    endif
+    !    call pdf_deallocate(lat_pdf)
+    !    !
+    ! endif
     !
   end subroutine MC_Vo2_2D
 
@@ -538,7 +632,7 @@ contains
     integer                    :: i,j
     real(8)                    :: rho,theta
     !
-    open(200,file=str(pfile)//".dat")
+    open(200,file=str(pfile))
     do i=1,Nx
        do j=1,Nx
           rho = sqrt(arrayX1(Lattice(i,j,1))**2 + arrayX2(Lattice(i,j,2))**2)
@@ -561,7 +655,7 @@ contains
     !
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"_AllPoints.pdf'"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//".dat' u (xf($4,$3)):(yf($4,$3)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"' u (xf($4,$3)):(yf($4,$3)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
     !
     write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
     write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
@@ -571,7 +665,7 @@ contains
     write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"_Vec.pdf'"
-    write(200,"(A)")"plot '"//str(pfile)//".dat"//"' u 1:2:3 with image, '"//str(pfile)//".dat' u ($1):($2):(xf($4*0.6,$3)):(yf($4*0.6,$3)) with vectors as 1"
+    write(200,"(A)")"plot '"//str(pfile)//"' u 1:2:3 with image, '"//str(pfile)//"' u ($1):($2):(xf($4*0.6,$3)):(yf($4*0.6,$3)) with vectors as 1"
     !
     close(200)
     !
@@ -582,16 +676,17 @@ contains
     integer,dimension(2) :: point
     character(len=*)     :: pfile
     logical              :: last
-    real(8)              :: rho,theta
+    real(8)              :: rho,theta,x,y
     integer,save         :: iter=0
     !
     if(.not.last)then
        iter = iter+1
-       rho  = sqrt(arrayX1(point(1))**2 + arrayX2(point(2))**2)
-       theta= get_theta(arrayX1(point(1)),arrayX2(point(2)))
-       open(200,file=str(pfile)//".dat",access='append')
-       write(200,*)theta,rho,vo2_potential(point(1),point(2))
+       x = arrayX1(point(1))
+       y = arrayX2(point(2))
+       open(200,file=str(pfile),access='append')
+       write(200,*)x,y,vo2_potential(point(1),point(2))/ceiling(Alat**2)/lambda
        close(200)
+       !
        return
     endif
     open(200,file="plot_"//str(pfile)//".gp")
@@ -606,21 +701,24 @@ contains
     write(200,"(A)")"yf(r,phi) = r*sin(phi)"
     write(200,"(A)")""
     write(200,"(A)")""
+    write(200,"(A)")"start=1"
+    write(200,"(A)")"step=100"
+    write(200,"(A)")""
     write(200,"(A)")"##Map plot"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"do for [i=1:"//str(iter)//":10] {"
-    write(200,"(A)")"set title 'i='.i"   
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//".dat' every ::i::i using (xf($2,$1)):(yf($2,$1)) w p pointtype 7 pointsize 1.5 lc rgb 'white','"//str(pfile)//".dat' every ::1::i using (xf($2,$1)):(yf($2,$1)) w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"do for [i=start:"//str(Nsweep)//":step] {"
+    write(200,"(A)")"set title 'i='.i"
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image,'"//str(pfile)//"' every ::start::i using 1:2 w l ls 1  linewidth 0.3 lc rgb 'gray','"//str(pfile)//"' every ::i::i using 1:2 w p pointtype 7 pointsize 1.5 lc rgb 'green'"
     write(200,"(A)")"}"
     write(200,"(A)")""
     write(200,"(A)")""
     write(200,"(A)")"##Surface plot"
     write(200,"(A)")"#set xrange [-2.2000:2.2000]"
     write(200,"(A)")"#set yrange [-2.8000:2.8000]"
-    write(200,"(A)")"#set zrange [-0.2:0]"
-    write(200,"(A)")"#do for [i=1:"//str(iter)//":1] {"
-    write(200,"(A)")"#set title 'i='.i"   
-    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'mcVO2_PointGif.dat' every ::i::i using (xf($2,$1)):(yf($2,$1)):3 w p pointtype 7 pointsize 1.5 lc rgb 'white', 'mcVO2_PointGif.dat' every ::1::i using (xf($2,$1)):(yf($2,$1)):3 w l ls 1 lc rgb 'white'"
+    write(200,"(A)")"#set zrange [-1:0]"
+    write(200,"(A)")"#do for [i=start:"//str(Nsweep)//":step] {"
+    write(200,"(A)")"#set title 'i='.i"
+    write(200,"(A)")"#splot 'VO2_x1x2_data.dat' u 1:2:3 with pm3d,'"//str(pfile)//"' every ::start::i using 1:2:3 w l ls 1  linewidth 0.3 lc rgb 'gray','"//str(pfile)//"' every ::i::i using 1:2:3 w p pointtype 7 pointsize 1.5 lc rgb 'green'"
     write(200,"(A)")"#}"
     write(200,"(A)")""
     write(200,"(A)")""
@@ -628,6 +726,23 @@ contains
   end subroutine print_point
 
 
+
+  subroutine print_angle(point,pfile)
+    integer,dimension(2) :: point
+    character(len=*)     :: pfile
+    real(8)              :: rho,theta,x,y
+    integer,save         :: iter=0
+    !
+    iter = iter+1
+    x = arrayX1(point(1))
+    y = arrayX2(point(2))
+    rho  = sqrt(arrayX1(point(1))**2 + arrayX2(point(2))**2)
+    theta= get_theta(arrayX1(point(1)),arrayX2(point(2)))
+    open(200,file=pfile,access='append')
+    write(200,*)iter,theta/pi*180
+    close(200)
+    return
+  end subroutine print_angle
 
 
 
