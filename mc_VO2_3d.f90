@@ -15,6 +15,7 @@ program vo2_3d
   integer                            :: Rflip1
   integer                            :: Rflip2
   integer                            :: Npoints
+  integer                            :: NprintLat
   real(8)                            :: dx1
   real(8)                            :: dx2
   real(8)                            :: Temp,p_global
@@ -63,6 +64,7 @@ program vo2_3d
   call parse_input_variable(Nwarm,"Nwarm","inputVO2.conf",default=1000)
   call parse_input_variable(Nmeas,"Nmeas","inputVO2.conf",default=100)
   call parse_input_variable(Npoints,"Npoints","inputVO2.conf",default=10)
+  call parse_input_variable(NprintLat,"NprintLat","inputVO2.conf",default=10)
   call parse_input_variable(Temp,"Temp","inputVO2.conf",default=10d0)
   call parse_input_variable(TempFile,"TempFile","inputVO2.conf",default="list_temp.in")
   call parse_input_variable(Mfit1,"MFit1","inputVO2.conf",default=1000)
@@ -74,6 +76,7 @@ program vo2_3d
   call parse_input_variable(wPDF1d,"wPDF1d","inputVO2.conf",default=.true.)
   call parse_input_variable(wPDF2d,"wPDF2d","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
+  if(MpiMaster)call print_input()
   !
   if(Mfit1<=size(X1).OR.Mfit2<=size(X2))stop "Error: Mfit1 <= size(X1)=45 OR Mfit2 <= size(X2)=60 "
   !
@@ -242,7 +245,6 @@ contains
     integer,dimension(Nx,Nx,Nx,2) :: lattice
     integer                       :: i,j,k,unit
     !
-
     open(free_unit(unit),file="lattice_rank"//str(MpiRank,4)//".restart")
     do i=1,Nx
        do j=1,Nx
@@ -379,7 +381,7 @@ contains
     real(8)                        :: E0
     real(8)                        :: Eflip
     real(8)                        :: Ediff
-    real(8)                        :: P
+    real(8)                        :: P,ran
     logical                        :: in_bool
     !    
     integer                        :: Nacc
@@ -416,7 +418,6 @@ contains
     Nlat=Nx*Nx*Nx
     !
     call Init_Lattice(Lattice)
-    call print_Lattice(Lattice,"mc_Init_Lattice_Temp"//str(Temp)//".dat")
     !
     Ene = Lattice_Energy(Lattice)
     Mag = Lattice_Magnetization(Lattice)
@@ -442,13 +443,6 @@ contains
     Emin =  huge(1d0)
     Emax = -huge(1d0)
     !
-    if(wPDF2d)then
-       call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
-       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
-       lat_sigma = reshape([0.1d0,0d0,0d0,0.1d0],[2,2])
-       call pdf_push_sigma(lat_pdf,lat_sigma)
-    endif
-    !
     if(MpiMaster)call start_timer()
     MCsweep: do iter=1,Nsweep
        !
@@ -472,9 +466,13 @@ contains
                 i2_flip = i2-Rflip2 + floor(rnd(2)*(2*Rflip2+1))
                 !
                 if(mersenne()>p_global)then
-                   if(mersenne()<=0.5d0)then
+                   ran = mersenne()
+                   if(ran<=1d0/3d0)then
                       i1_flip = Mfit1-i1_flip+1
+                   elseif(ran>2d0/3d0)then
+                      i2_flip = Mfit2-i2_flip+1
                    else
+                      i1_flip = Mfit1-i1_flip+1
                       i2_flip = Mfit2-i2_flip+1
                    endif
                 endif
@@ -510,11 +508,9 @@ contains
                    M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
                    Esq_sum = Esq_sum + Ene*Ene
                    Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
-                   write(999-MpiRank,*)Ene/Nlat
+                   if(wPDF1d)write(999-MpiRank,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
-                   !
-                   if(wPDF2d)call pdf_accumulate(lat_pdf,[arrayX1(lattice(i,j,k,1)),arrayX2(lattice(i,j,k,2))])
                    !
                 endif
                 !
@@ -530,6 +526,7 @@ contains
           call eta(iter,Nsweep)
        endif
        if(wPoint)then
+          if(NprintLat>1.AND.mod(iter,Nsweep/NprintLat)==0)call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//"_iter"//str(iter,12)//".dat")
           do ii=1,Npoints
              call Print_Point(Lattice(myI(ii),myJ(ii),myK(ii),:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat",.false.)
              call Print_Angle(Lattice(myI(ii),myJ(ii),myK(ii),:),"mc_AngleDynamics_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat")
@@ -589,15 +586,15 @@ contains
        if(MpiMaster)call stop_timer()
        !
        call pdf_normalize(ene_pdf)
-       !
        ene_pdf_tmp=0d0
        call AllReduce_MPI(MpiComm,ene_pdf%pdf,ene_pdf_tmp);ene_pdf_tmp=ene_pdf_tmp/MpiSize
        ene_pdf%pdf = ene_pdf_tmp
        !
        if(MpiMaster)then
           call pdf_print(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".dat")
-          call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
           call pdf_save(ene_pdf,"mc_PDF_E_Temp"//str(Temp)//".save")
+          !
+          call pdf_print_moments(ene_pdf,"mc_Moments_PDF_E_Temp"//str(Temp)//".dat")
           write(*,"(A)")""
        endif
        !
@@ -605,6 +602,24 @@ contains
     endif
     !
     if(wPDF2d)then
+       call pdf_allocate(lat_pdf,[Npdf2,Npdf2])
+       call pdf_set_range(lat_pdf,[-3d0,-3d0],[3d0,3d0])
+       ! lat_sigma = reshape([sqrt(Msq_mean-M_mean**2),0d0,0d0,sqrt(Msq_mean-M_mean**2)],[2,2])
+       lat_sigma = reshape([0.02d0,0d0,0d0,0.02d0],[2,2])
+       call pdf_push_sigma(lat_pdf,lat_sigma)
+       !
+       if(MpiMaster)call start_timer()
+       do i=1,Nx
+          do j=1,Nx
+             do k=1,Nx
+                mag(1)   = arrayX1(Lattice(i,j,k,1))
+                mag(2)   = arrayX2(Lattice(i,j,k,2))
+                call pdf_accumulate(lat_pdf,mag)
+             enddo
+          enddo
+       enddo
+       if(MpiMaster)call stop_timer()
+       !
        call pdf_normalize(lat_pdf)
        lat_pdf_tmp=0d0
        call AllReduce_MPI(MpiComm,lat_pdf%pdf,lat_pdf_tmp);lat_pdf_tmp=lat_pdf_tmp/MpiSize
@@ -615,7 +630,6 @@ contains
           call pdf_save(lat_pdf,"mc_PDF_X_Temp"//str(Temp)//".save")
           write(*,"(A)")""
        endif
-       !
        call pdf_deallocate(lat_pdf)
     endif
     !
@@ -633,16 +647,16 @@ contains
     real(8)                       :: rho,theta,x1,x2
     !
     open(200,file=str(pfile))
-    k = mt_uniform(1,Nx)
-    do i=1,Nx
-       do j=1,Nx
-          x1   = arrayX1(Lattice(i,j,k,1))
-          x2   = arrayX2(Lattice(i,j,k,2))
-          rho  = sqrt(x1**2 + x2**2)
-          theta= get_theta(x1,x2)
-          write(200,*)i,j,k,theta,rho
+    do k=1,Nx
+       do i=1,Nx
+          do j=1,Nx
+             x1   = arrayX1(Lattice(i,j,k,1))
+             x2   = arrayX2(Lattice(i,j,k,2))
+             write(200,*)i,j,k,X1,X2,get_theta(x1,x2)
+          enddo
+          ! write(200,*)
        enddo
-       write(200,*)""
+       write(200,*)
     enddo
     close(200)
     open(200,file="plot_"//str(pfile)//".gp")
@@ -651,26 +665,37 @@ contains
     write(200,"(A)")"reset"
     write(200,"(A)")"set size square"
     write(200,"(A)")"unset key"
-    !
-    write(200,"(A)")"scale=0.6"
-    write(200,"(A)")"xf(r,phi) = r*cos(phi)"
-    write(200,"(A)")"yf(r,phi) = r*sin(phi)"
-    write(200,"(A)")"set style arrow 1 head filled size screen 0.01,15,45 fixed lc rgb 'black'"
-    !
+    write(200,"(A)")"set style arrow 1 head filled size screen 0.005,15,45 fixed lc rgb 'black'"
+    write(200,"(A)")""
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"AllPoints.pdf'"
     write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"' u (xf($5,$4)):(yf($5,$4)) w p pointtype 7 pointsize 0.5 lc rgb 'white'"
-    !
+    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"' u 4:5 w p pointtype 7 pointsize 0.5 lc rgb 'white'"
+    write(200,"(A)")"unset view"
+    write(200,"(A)")"unset pm3d"
+    write(200,"(A)")""
     write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
     write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
     write(200,"(A)")"set cbrange [0:2*pi]"
     write(200,"(A)")"set xtics 5"
     write(200,"(A)")"set ytics 5"
+    write(200,"(A)")"set ztics 5"
     write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
     write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
     write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
-    write(200,"(A)")"k="//str(k)
-    write(200,"(A)")"plot '"//str(pfile)//"' u 1:2:4 with image, '"//str(pfile)//"' u 1:2:(xf($5*scale,$4)):(yf($5*scale,$4)) with vectors as 1"
+    write(200,"(A)")"k="//str(mt_uniform(1,Nx)-1)
+    write(200,"(A)")"plot '"//str(pfile)//"' every :::k::k u 1:2:6 with image, '"//str(pfile)//"' every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
+    write(200,"(A)")""
+    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec3d.pdf'"
+    write(200,"(A)")"set view 44,50"
+    write(200,"(A)")"set xyplane at 0"
+    write(200,"(A)")"splot '"//str(pfile)//"' u 1:2:3:6 with points palette pointsize 0.4 pointtype 7"
+    write(200,"(A)")""
+    write(200,"(A)")"set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
+    write(200,"(A)")"set output '"//str(pfile)//"Vec.gif'"
+    write(200,"(A)")"do for [k=0:"//str(Nx-1)//":1] {"
+    write(200,"(A)")"set title 'k='.k"
+    write(200,"(A)")"plot '"//str(pfile)//"' every :::k::k u 1:2:6 with image, '"//str(pfile)//"' every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
+    write(200,"(A)")"}"
     !
     close(200)
     !
@@ -769,7 +794,7 @@ contains
   end function get_theta
 
 
-end program
+end program vo2_3d
 
 
 
