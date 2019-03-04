@@ -73,10 +73,11 @@ program vo2_3d
   call parse_input_variable(dx2,"dx2","inputVO2.conf",default=0.1d0)
   call parse_input_variable(seed,"SEED","inputVO2.conf",default=2342161)
   call parse_input_variable(wPoint,"WPOINT","inputVO2.conf",default=.false.)
-  call parse_input_variable(wPDF1d,"wPDF1d","inputVO2.conf",default=.true.)
+  call parse_input_variable(wPDF1d,"wPDF1d","inputVO2.conf",default=.false.)
   call parse_input_variable(wPDF2d,"wPDF2d","inputVO2.conf",default=.false.)
   if(MpiMaster)call save_input("inputVO2.conf")
   if(MpiMaster)call print_input()
+  call set_store_size(10)
   !
   if(Mfit1<=size(X1).OR.Mfit2<=size(X2))stop "Error: Mfit1 <= size(X1)=45 OR Mfit2 <= size(X2)=60 "
   !
@@ -526,10 +527,14 @@ contains
           call eta(iter,Nsweep)
        endif
        if(wPoint)then
-          if(NprintLat>1.AND.mod(iter,Nsweep/NprintLat)==0)call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//"_iter"//str(iter,12)//".dat")
+          if(NprintLat>1.AND.mod(iter,Nsweep/NprintLat)==0)&
+               call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_iter"//str(iter,12)//".dat")
           do ii=1,Npoints
-             call Print_Point(Lattice(myI(ii),myJ(ii),myK(ii),:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat",.false.)
-             call Print_Angle(Lattice(myI(ii),myJ(ii),myK(ii),:),"mc_AngleDynamics_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat")
+             call Print_Point(Lattice(myI(ii),myJ(ii),myK(ii),:),&
+                  "mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat",.false.)
+             !
+             call Print_Angle(Lattice(myI(ii),myJ(ii),myK(ii),:),&
+                  "mc_AngleDynamics_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(ii,2)//".dat")
           enddo
        endif
     enddo MCsweep
@@ -556,12 +561,14 @@ contains
        write(*,"(A,F21.12)") "E =",E_mean
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
-       !       
-       call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp)//".dat")
     endif
+    !
+    call print_Lattice(Lattice,"mc_Lattice_Temp"//str(Temp))
+    !
     if(wPoint)then
        do i=1,Npoints
-          call Print_Point(Lattice(myI(i),myJ(i),myK(i),:),"mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(i,2)//".dat",.true.)
+          call Print_Point(Lattice(myI(i),myJ(i),myK(i),:),&
+               "mc_PointGif_Temp"//str(Temp)//"_"//str(MpiRank,4)//"_"//str(i,2)//".dat",.true.)
        enddo
     endif
     !
@@ -643,10 +650,12 @@ contains
   subroutine print_lattice(lattice,pfile)
     integer,dimension(Nx,Nx,Nx,2) :: lattice
     character(len=*)              :: pfile
+    character(len=200)            :: pname
     integer                       :: i,j,k
     real(8)                       :: rho,theta,x1,x2
     !
-    open(200,file=str(pfile))
+    pname=str(pfile)//"_"//str(MpiRank,4)//".dat"
+    open(200,file=str(pname))
     do k=1,Nx
        do i=1,Nx
           do j=1,Nx
@@ -654,50 +663,64 @@ contains
              x2   = arrayX2(Lattice(i,j,k,2))
              write(200,*)i,j,k,X1,X2,get_theta(x1,x2)
           enddo
-          ! write(200,*)
        enddo
        write(200,*)
     enddo
     close(200)
-    open(200,file="plot_"//str(pfile)//".gp")
-    write(200,"(A)")"reset"
-    write(200,"(A)")"set terminal postscript eps enhanced color font 'Times-Roman'"
-    write(200,"(A)")"reset"
-    write(200,"(A)")"set size square"
-    write(200,"(A)")"unset key"
-    write(200,"(A)")"set style arrow 1 head filled size screen 0.005,15,45 fixed lc rgb 'black'"
-    write(200,"(A)")""
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"AllPoints.pdf'"
-    write(200,"(A)")"set pm3d map"
-    write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, '"//str(pfile)//"' u 4:5 w p pointtype 7 pointsize 0.5 lc rgb 'white'"
-    write(200,"(A)")"unset view"
-    write(200,"(A)")"unset pm3d"
-    write(200,"(A)")""
-    write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
-    write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
-    write(200,"(A)")"set cbrange [0:2*pi]"
-    write(200,"(A)")"set xtics 5"
-    write(200,"(A)")"set ytics 5"
-    write(200,"(A)")"set ztics 5"
-    write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
-    write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec.pdf'"
-    write(200,"(A)")"k="//str(mt_uniform(1,Nx)-1)
-    write(200,"(A)")"plot '"//str(pfile)//"' every :::k::k u 1:2:6 with image, '"//str(pfile)//"' every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
-    write(200,"(A)")""
-    write(200,"(A)")"set output '|ps2pdf -dEPSCrop - "//str(pfile)//"Vec3d.pdf'"
-    write(200,"(A)")"set view 44,50"
-    write(200,"(A)")"set xyplane at 0"
-    write(200,"(A)")"splot '"//str(pfile)//"' u 1:2:3:6 with points palette pointsize 0.4 pointtype 7"
-    write(200,"(A)")""
-    write(200,"(A)")"set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
-    write(200,"(A)")"set output '"//str(pfile)//"Vec.gif'"
-    write(200,"(A)")"do for [k=0:"//str(Nx-1)//":1] {"
-    write(200,"(A)")"set title 'k='.k"
-    write(200,"(A)")"plot '"//str(pfile)//"' every :::k::k u 1:2:6 with image, '"//str(pfile)//"' every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
-    write(200,"(A)")"}"
+    call file_gzip(str(pname))
     !
-    close(200)
+    if(MpiMaster)then
+       open(200,file="plot_"//str(pfile)//".gp")
+       write(200,"(A)")"reset"
+       write(200,"(A)")"set terminal postscript eps enhanced color font 'Times-Roman'"
+       write(200,"(A)")"reset"
+       write(200,"(A)")""
+       write(200,"(A)")"RANK='"//str(MpiRank,4)//"'"
+       write(200,"(A)")"PFILE='"//str(pfile)//"_'.RANK.'.dat'"
+       write(200,"(A)")"OUT_ALLPOINTS=PFILE.'_AllPoints.pdf'"
+       write(200,"(A)")"OUT_VECPDF=PFILE.'_Vec.pdf'"
+       write(200,"(A)")"OUT_VECGIF=PFILE.'_Vec.gif'"
+       write(200,"(A)")"OUT_VEC3D=PFILE.'_3d.pdf'"
+       write(200,"(A)")""
+       write(200,"(A)")"system('gunzip -v '.PFILE.'.gz')"
+       write(200,"(A)")""
+       write(200,"(A)")"set size square"
+       write(200,"(A)")"unset key"
+       write(200,"(A)")"set style arrow 1 head filled size screen 0.005,15,45 fixed lc rgb 'black'"
+       write(200,"(A)")""
+       write(200,"(A)")"set output '|ps2pdf -dEPSCrop - '.OUT_ALLPOINTS"
+       write(200,"(A)")"set pm3d map"
+       write(200,"(A)")"plot 'VO2_x1x2_data.dat' u 1:2:3 with image, PFILE u 4:5 w p pointtype 7 pointsize 0.5 lc rgb 'white'"
+       write(200,"(A)")"unset view"
+       write(200,"(A)")"unset pm3d"
+       write(200,"(A)")""
+       write(200,"(A)")"set xrange [0.5:"//str(Nx+0.5d0)//"]"
+       write(200,"(A)")"set yrange [0.5:"//str(Nx+0.5d0)//"]"
+       write(200,"(A)")"set cbrange [0:2*pi]"
+       write(200,"(A)")"set xtics 5"
+       write(200,"(A)")"set ytics 5"
+       write(200,"(A)")"set ztics 5"
+       write(200,"(A)")"set cbtics ('0'0, '' pi/2, '{/Symbol-Italic p}' pi, '' 3*pi/2, '{/Symbol-Italic 2p}' 2*pi)"
+       write(200,"(A)")"set palette model HSV defined ( 0 0 1 1, 1 1 1 1 )"
+       write(200,"(A)")"set output '|ps2pdf -dEPSCrop - '.OUT_VECPDF"
+       write(200,"(A)")"k="//str(mt_uniform(1,Nx)-1)
+       write(200,"(A)")"plot PFILE every :::k::k u 1:2:6 with image, PFILE every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
+       write(200,"(A)")""
+       write(200,"(A)")"set output '|ps2pdf -dEPSCrop - '.OUT_VEC3D"
+       write(200,"(A)")"set view 44,50"
+       write(200,"(A)")"set xyplane at 0"
+       write(200,"(A)")"splot PFILE u 1:2:3:6 with points palette pointsize 0.4 pointtype 7"
+       write(200,"(A)")""
+       write(200,"(A)")"set terminal gif size 450,450 nocrop animate delay 50 enhanced font 'Times-Roman'" 
+       write(200,"(A)")"set output OUT_VECGIF"
+       write(200,"(A)")"do for [k=0:"//str(Nx-1)//":1] {"
+       write(200,"(A)")"set title 'k='.k"
+       write(200,"(A)")"plot PFILE every :::k::k u 1:2:6 with image, PFILE every :::k::k u 1:2:(0.6*$4):(0.6*$5) with vectors as 1"
+       write(200,"(A)")"}"
+       write(200,"(A)")""
+       write(200,"(A)")"system('gzip -v '.PFILE)"
+       close(200)
+    endif
     !
   end subroutine print_lattice
 
@@ -794,7 +817,7 @@ contains
   end function get_theta
 
 
-end program vo2_3d
+end program
 
 
 
