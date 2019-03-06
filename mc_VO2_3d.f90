@@ -402,6 +402,12 @@ contains
     real(8)                        :: M_mean
     real(8)                        :: Msq_mean
     !
+    real(8)                        :: X1_sum,X2_sum
+    real(8)                        :: X1sq_sum,X2sq_sum
+    real(8)                        :: X1_mean,X2_mean
+    real(8)                        :: X1sq_mean,X2sq_mean
+    real(8)                        :: sX1,sX2
+    !
     integer                        :: iter
     integer,dimension(Npoints)     :: myI,myJ,myK
     integer                        :: i,ii,j,k,Nlat
@@ -434,13 +440,16 @@ contains
     M_mean   = 0d0
     Esq_mean = 0d0
     Msq_mean = 0d0
+    !
+    X1_sum = 0d0
+    X2_sum = 0d0
+    !
     do i=1,Npoints
        myI(i) = mt_uniform(1,Nx)
        myJ(i) = mt_uniform(1,Nx)
        myK(i) = mt_uniform(1,Nx)
     enddo
     !
-
     Emin =  huge(1d0)
     Emax = -huge(1d0)
     !
@@ -507,8 +516,12 @@ contains
                    Nave    = Nave + 1
                    E_sum   = E_sum + Ene
                    M_sum   = M_sum + sqrt(dot_product(Mag,Mag))
+                   X1_sum  = X1_sum + Mag(1)
+                   X2_sum  = X2_sum + Mag(2)
                    Esq_sum = Esq_sum + Ene*Ene
                    Msq_Sum = Msq_Sum + dot_product(Mag,Mag)
+                   X1sq_sum= X1sq_sum + Mag(1)*Mag(1)
+                   X2sq_sum= X2sq_sum + Mag(2)*Mag(2)
                    if(wPDF1d)write(999-MpiRank,*)Ene/Nlat
                    if(Ene/Nlat < Emin) Emin=Ene/Nlat
                    if(Ene/Nlat > Emax) Emax=Ene/Nlat
@@ -544,20 +557,26 @@ contains
     !
     call AllReduce_MPI(MpiComm,E_sum,E_mean);E_mean=E_mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,M_sum,M_mean);M_mean=M_Mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,X1_sum,X1_mean);X1_mean=X1_Mean/MpiSize/Nave/Nlat
+    call AllReduce_MPI(MpiComm,X2_sum,X2_mean);X2_mean=X2_Mean/MpiSize/Nave/Nlat
     call AllReduce_MPI(MpiComm,Esq_sum,Esq_mean);Esq_mean=Esq_mean/MpiSize/Nave/Nlat/Nlat
     call AllReduce_MPI(MpiComm,Msq_sum,Msq_mean);Msq_mean=Msq_mean/MpiSize/Nave/Nlat/Nlat
     !
     Chi = (Msq_Mean - M_mean**2)/Temp
     Cv  = (Esq_mean - E_mean**2)/Temp/Temp
+    sX1 = (X1sq_Mean - X1_mean**2)/Temp
+    sX2 = (X2sq_Mean - X2_mean**2)/Temp
     !
     if(MpiMaster)then
-       write(unit,*)temp,M_mean,E_mean,Cv,Chi,Nave,Nsweep,Nx
+       write(unit,*)temp,M_mean,X1_mean,X2_mean,E_mean,Cv,Chi,sX1,sX2,Nave,Nsweep,Nx
        write(*,"(A,I0)")     "Nx=",Nx
        write(*,"(A,I0)")     "Na=",Nave
        write(*,"(A,I0)")     "Ns=",Nsweep
        write(*,"(A,I0)")     "Nb=",Nbrk
        write(*,"(A,F21.12)") "T =",temp
        write(*,"(A,F21.12)") "M =",M_mean
+       write(*,"(A,F21.12)") "X1=",X1_mean
+       write(*,"(A,F21.12)") "X2=",X2_mean
        write(*,"(A,F21.12)") "E =",E_mean
        write(*,"(A,F21.12)") "C =",Cv
        write(*,"(A,F21.12)") "X =",Chi
